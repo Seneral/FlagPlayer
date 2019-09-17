@@ -323,7 +323,7 @@ function ct_loadContent () {
 	ct_updatePageState();
 }
 function ct_newPageState () { // Register new page
-	history.pushState({}, "OpenYT");
+	history.pushState({}, "FlagPlayer");
 }
 function ct_updatePageState () { // Update page with new information
 	var url = new URL(window.location.href);
@@ -331,18 +331,18 @@ function ct_updatePageState () { // Update page with new information
 	yt_url = ytHost;
 	
 	if (ct_page == Page.Home)
-		state.title = "Home | OpenYT";
+		state.title = "Home | FlagPlayer";
 
 	if (ct_page == Page.Media)  {
-		if (yt_video) state.title = yt_video.meta.title + " | OpenYT";
-		else if (!state.title) state.title = "Loading | OpenYT";
+		if (yt_video) state.title = yt_video.meta.title + " | FlagPlayer";
+		else if (!state.title) state.title = "Loading | FlagPlayer";
 		url.searchParams.set("v", yt_videoID);
 		yt_url += "/watch?v=" + yt_videoID;
 	} else url.searchParams.delete("v");
 	
 	if (ct_page == Page.Channel) {
-		if (yt_channel) state.title = yt_channel.meta.name + " | OpenYT";
-		else if (!state.title) state.title = "Channel | OpenYT";
+		if (yt_channel) state.title = yt_channel.meta.name + " | FlagPlayer";
+		else if (!state.title) state.title = "Channel | FlagPlayer";
 		if (yt_channelID.user) {
 			url.searchParams.set("u", yt_channelID.user);
 			url.searchParams.delete("c");
@@ -358,7 +358,7 @@ function ct_updatePageState () { // Update page with new information
 	}
 	
 	if (ct_page == Page.Search) {
-		state.title = "'" + yt_searchTerms + "' - Search | OpenYT";
+		state.title = "'" + yt_searchTerms + "' - Search | FlagPlayer";
 		url.searchParams.set("q", encodeURIComponent(yt_searchTerms));
 		yt_url += "/results?search_query=" + encodeURIComponent(yt_searchTerms);
 	} else url.searchParams.delete("q");
@@ -374,7 +374,7 @@ function ct_updatePageState () { // Update page with new information
 	url.searchParams.delete("t");
 	
 	// Update state
-	state.title = state.title || "OpenYT";
+	state.title = state.title || "FlagPlayer";
 	document.title = state.title;
 	if (history && history.replaceState) history.replaceState(state, state.title, url.href);
 	else window.location = url; // Triggers reload, not perfect but better than no link update
