@@ -1334,11 +1334,18 @@ button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 	flex-direction: row;
 	margin-bottom: 1em;
 }
+.mobile .tabBar {
+	justify-content: space-around;
+	width: 100%;
+}
 .tabHeader {
-	padding: 0.8em 2em 0.8em;
+	padding: 0.8em 1em 0.8em;
 	font-size: 120%;
 	font-weight: bolder;
 	color: var(--txt-sec-color);
+}
+.desktop .tabHeader {
+	padding: 0.8em 2em 0.8em;
 }
 .tabHeader:hover {
 	background-color: var(--bg-sec-color);

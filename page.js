@@ -193,6 +193,7 @@ var md_attemptPause; // Flag to indicate play start attempt is to be aborted
 var interfaceLang = "en;q=0.9";
 var contentLang = "en;q=0.9"; // content language (auto-translate) - * should remove translation
 var ytHost = "https://www.youtube.com";
+var ytHostMobile = "https://m.youtube.com";
 var advancedCorsHost = undefined; // Boolean: Supports cookie-passing for (with others) comments
 var corsAPIHost = "https://cors-anywhere.herokuapp.com/"; // Default value only
 //"http://localhost:8080/";
@@ -923,6 +924,9 @@ function yt_browse (subPath, callback, peek) {
 		try { page.configParams = JSON.parse(page.html.match (/ytcfg\.set\s*\(({.*?})\);/)[1]); 
 		} catch (e) { console.error("Failed to get config params!", e); }
 
+		// Whether YouTube thinks this is mobile - independant from ct_isDesktop, which is this apps opinion
+		page.isDesktop = Object.keys(page.initialData.contents).some(function (s) { return s.startsWith("twoColumn"); });
+
 		// Extract youtube secrets
 		page.secrets = {};
 		
@@ -1132,7 +1136,7 @@ function yt_parseAJAXVideo (vdData) {
 }
 function yt_loadListData(addElements, initialLoad, supressLoader) {
 	return function (pagedContent) { 
-		var requestURL = "https://www.youtube.com/list_ajax?action_get_list=1&style=json&list=" + pagedContent.data.listID + "&index=" + pagedContent.index;
+		var requestURL = ytHost + "/list_ajax?action_get_list=1&style=json&list=" + pagedContent.data.listID + "&index=" + pagedContent.index;
 		PAGED_REQUEST(pagedContent, "GET", requestURL, false, function(uploadsData) {
 			// Parsing
 			try { pagedContent.data.lastPage = JSON.parse(uploadsData);
@@ -1202,7 +1206,7 @@ function yt_loadSearchPage () {
 	if (!yt_searchTerms) return;
 	// Load Search Page
 	yt_searchResults = undefined;
-	var requestURL = "https://www.youtube.com/results?pbj=1&search_query=" + encodeURIComponent(yt_searchTerms);
+	var requestURL = ytHost + "/results?pbj=1&search_query=" + encodeURIComponent(yt_searchTerms);
 	yt_browse("/results?pbj=1&search_query=" + encodeURIComponent(yt_searchTerms), function() {
 		if (ct_page != Page.Search) return;
 		yt_searchResults = {};
@@ -1214,7 +1218,7 @@ function yt_loadSearchPageResults(pagedContent) {
 }
 /* AJAX Version - lighter, but only video results */
 function yt_loadSearchResultsAJAX(pagedContent) {
-	var requestURL = "https://www.youtube.com/search_ajax?style=json&search_query=" + encodeURIComponent(yt_searchTerms) + "&page=" + (pagedContent.index+1);	
+	var requestURL = ytHost + "/search_ajax?style=json&search_query=" + encodeURIComponent(yt_searchTerms) + "&page=" + (pagedContent.index+1);	
 	PAGED_REQUEST(pagedContent, "POST", requestURL, false, function(searchResultData) {
 		// Parsing
 		if (!yt_searchResults) yt_searchResults = { hits: 0, videos: [] };
@@ -1248,7 +1252,7 @@ function yt_loadChannelData() {
 	var channelURL = (yt_channelID.user? "/user/" + yt_channelID.user : "/channel/" + yt_channelID.channel) + "/videos";
 	yt_browse (channelURL, function () {
 		if (ct_page != Page.Channel) return;
-		yt_channel = {};
+		yt_channel = { url: channelURL };
 		yt_extractChannelMetadata();
 		yt_extractChannelUploads();
 		ct_updatePageState();
@@ -1327,63 +1331,6 @@ function yt_extractChannelUploads() {
 			finalizeTab(tab);
 		}	
 	});
-
-
-
-	/*yt_channel.uploads.videos = [];
-	var uploadsTab = yt_channel.uploads.tabs.find (tab => tab.title.toLowerCase().includes("uploads"));
-	if (uploadsTab) {
-		if (uploadsTab.continuationContents) {
-			// Accept current videos, setup continuation loader
-			console.warn("Continuation tab!", uploadsTab, yt_channel.uploads.tabs);
-			yt_channel.uploads.videos = uploadsTab.videos; 
-			yt_channel.uploads.conToken = uploadsTab.continuationContents.conToken;
-			yt_channel.uploads.itctToken = uploadsTab.continuationContents.itctToken;
-			ui_addChannelUploads(I("channelUploads"), yt_channel.uploads.videos, 0);
-
-			if (yt_channel.uploads.conToken) {
-				ct_registerPagedContent("CH", I("channelUploads"), yt_loadChannelPageUploads, 1000, yt_channel.uploads);
-				ct_checkPagedContent();
-			}
-		} 
-		else if (uploadsTab.browseContent) {
-			// Expandable tab among others, accept current videos, setup browse loader
-			console.warn("Browse Tab!", uploadsTab, yt_channel.uploads.tabs);
-			yt_browse (uploadsTab.browseContent.startURL, function (browsePage) {
-				
-				var uploadsTabs = yt_extractChannelPageTabs(browsePage.initialData);
-				var uploadsTab = uploadsTabs[0];
-
-				yt_channel.uploads.videos = uploadsTab.videos; 
-				if (uploadsTab.continuationContents) {
-					yt_channel.uploads.conToken = uploadsTab.continuationContents.conToken;
-					yt_channel.uploads.itctToken = uploadsTab.continuationContents.itctToken;
-				} 
-				ui_addChannelUploads(I("channelUploads"), yt_channel.uploads.videos, 0);
-
-
-				if (yt_channel.uploads.conToken) {
-					ct_registerPagedContent("CH", I("channelUploads"), yt_loadChannelPageUploads, 1000, yt_channel.uploads);
-					ct_checkPagedContent();
-				}
-			}, true); // Peek only, don't replace current page
-		}
-		else if (uploadsTab.listContent) {
-			// Only list content, setup list loader
-			console.warn("List tab!", uploadsTab, yt_channel.uploads.tabs);
-			yt_channel.uploads.listID = uploadsTab.listContent.listID;
-			ct_registerPagedContent("CH", I("channelUploads"), yt_loadListData(ui_addChannelUploads), 1000, yt_channel.uploads);
-			ct_checkPagedContent();
-		}
-		else {
-			console.warn("Simple Tab!", uploadsTab, yt_channel.uploads.tabs);
-			yt_channel.uploads.videos = uploadsTab.videos; 
-			ui_addChannelUploads(I("channelUploads"), yt_channel.uploads.videos, 0);
-		}
-	}
-	else {
-		console.warn("No suitable tabs found:", yt_channel.uploads.tabs);
-	}*/
 }
 function yt_extractChannelPageTabs (initialData) {
 
@@ -1394,22 +1341,34 @@ function yt_extractChannelPageTabs (initialData) {
 	
 	var tabs = [];
 	var handleContainer = function (c) {
+		var tab = {};
 		if (c.sectionListRenderer) { // Usually base container with multiple itemSectionRenderers
 			c.sectionListRenderer.contents.forEach(handleContainer);
 			return;
 		}
-		if (c.itemSectionRenderer) { // Usually container with one ShelfRenderer
-			c.itemSectionRenderer.contents.forEach(handleContainer);
-			return;
+		else if (c.itemSectionRenderer) { // Usually container with one ShelfRenderer
+			var s = c.itemSectionRenderer.contents[0];
+			if (!c.itemSectionRenderer.continuations && (s.shelfRenderer || s.verticalListRenderer || s.horizontalListRenderer || s.gridRenderer)) {
+				c.itemSectionRenderer.contents.forEach(handleContainer);
+				return;
+			}
+			// It directly contains videos
+			tab.title = "Uploads";
+			if (c.itemSectionRenderer.continuations) {
+				tab.continuationContents = {
+					conToken: c.itemSectionRenderer.continuations[0].nextContinuationData.continuation,
+					itctToken: c.itemSectionRenderer.continuations[0].nextContinuationData.clickTrackingParams,
+				};
+			}
+			tab.videos = yt_parseChannelPageVideos(c.itemSectionRenderer.contents);
 		}
-		
-		var tab = {};
-		if (c.shelfRenderer) { // Nasty shelf setup - handle multiple tabs
+		else if (c.shelfRenderer) { // Nasty shelf setup - handle multiple tabs
 			var s = c.shelfRenderer;
 			tab.title = yt_parseLabel (s.title);
+			var play = s.playAllButton? s.playAllButton.buttonRenderer.navigationEndpoint : s.playEndpoint;
 			tab.listContent = { // Associated list (may not contain all videos)
-				listID: s.playAllButton.buttonRenderer.navigationEndpoint.watchEndpoint.playlistId,
-				itctToken: s.playAllButton.buttonRenderer.navigationEndpoint.clickTrackingParams,
+				listID: play.watchEndpoint.playlistId,
+				itctToken: play.clickTrackingParams,
 			};
 			if (s.endpoint.commandMetadata.webCommandMetadata.url.includes("shelf_id")) { // Usually when content is gridRenderer
 				tab.browseContent = { // May imply that associated list does not contain all videos - only separate shelf browse page does
@@ -1433,6 +1392,7 @@ function yt_extractChannelPageTabs (initialData) {
 			}
 			tab.videos = yt_parseChannelPageVideos(c.gridRenderer.items);
 		}
+		if (tab.title.toLowerCase().includes("more")) tab.title = "More";
 		tab.id = tab.title.toLowerCase().replace(/\s/g, "-");
 		tabs.push(tab);
 	};
@@ -1440,25 +1400,27 @@ function yt_extractChannelPageTabs (initialData) {
 	return tabs;
 }
 function yt_loadChannelPageUploads(pagedContent) {
-	var requestURL = "https://www.youtube.com/browse_ajax?" +
-		"ctoken=" + pagedContent.data.conToken + "&continuation=" + pagedContent.data.conToken + "&itct=" + pagedContent.data.itctToken;
+	var requestURL;
+	if (yt_page.isDesktop) requestURL = ytHost + "/browse_ajax?" + "ctoken=" + pagedContent.data.conToken + "&continuation=" + pagedContent.data.conToken + "&itct=" + pagedContent.data.itctToken;
+	else requestURL = ytHostMobile + yt_channel.url + "?pbj=1&" + "ctoken=" + pagedContent.data.conToken + "&itct=" + pagedContent.data.itctToken;
 	PAGED_REQUEST(pagedContent, "GET", requestURL, true, function(uploadsData) {
 		// Parsing
-		try { pagedContent.data.lastPage = JSON.parse(uploadsData)[1]; 
-		} catch (e) { console.error("Failed to get channel uploads data!", e, { uploadsData: uploadsData }); return; }		
+		try { var obj = JSON.parse(uploadsData); 
+		pagedContent.data.lastPage = yt_page.isDesktop? obj[1] : obj; 
+		} catch (e) { console.error("Failed to get channel uploads data!", e, { uploadsData: uploadsData }); return; }
 		yt_updateNavigation(pagedContent.data.lastPage);
 		
 		// Extract video uploads
 		var prevVidCount = pagedContent.data.videos.length;
 		var continuation = pagedContent.data.lastPage.response.continuationContents;
-		var contents = (continuation.gridContinuation || undefined);
+		var contents = (continuation.gridContinuation || continuation.itemSectionContinuation);
 		pagedContent.data.conToken = contents.continuations? contents.continuations[0].nextContinuationData.continuation : undefined;
 		pagedContent.data.itctToken = contents.continuations? contents.continuations[0].nextContinuationData.clickTrackingParams : undefined;
-		pagedContent.data.videos = pagedContent.data.videos.concat(yt_parseChannelPageVideos(contents.items));
+		pagedContent.data.videos = pagedContent.data.videos.concat(yt_parseChannelPageVideos(contents.items || contents.contents));
 		ui_addChannelUploads(pagedContent.container, pagedContent.data.videos, prevVidCount);
 		
 		// Finish
-		console.log("YT Uploads:", pagedContent.data, yt_channel.uploads.lastPage);
+		console.log("YT Uploads:", pagedContent.data, pagedContent.data.lastPage);
 		pagedContent.triggerDistance = 500; // Increase after first load
 		return pagedContent.data.conToken != undefined;
 	});
@@ -1693,7 +1655,7 @@ function yt_extractRelatedVideoData() {
 function yt_loadMoreRelatedVideos (pagedContent) {
 	if (ct_pref.relatedVideos != "ALL") return; // Still registered to allow it to load immediately when settings change
 	
-	var requestURL = "https://www.youtube.com/related_ajax?" +  
+	var requestURL = ytHost + "/related_ajax?" + 
 		"&ctoken=" + yt_video.related.conToken + "&continuation=" + yt_video.related.conToken + "&itct=" + yt_video.related.itctToken; 
 	PAGED_REQUEST(pagedContent, "POST", requestURL, true, function(relatedData) {
 		// Parsing
@@ -1823,7 +1785,7 @@ function yt_loadMoreComments (pagedContent) {
 		return;
 	
 	var isReplyRequest = pagedContent.data.replies != undefined;
-	var requestURL = "https://www.youtube.com/comment_service_ajax?" + 
+	var requestURL = ytHost + "/comment_service_ajax?" + 
 		(isReplyRequest? "action_get_comment_replies" : "action_get_comments") + "=1&pbj=1" + 
 		"&ctoken=" + pagedContent.data.conToken + (pagedContent.data.conToken.length < 3000? "&continuation=" + pagedContent.data.conToken : "") +  "&itct=" + yt_video.commentData.itctToken; 
 	PAGED_REQUEST(pagedContent, "POST", requestURL, true, function(commentData) {
@@ -2576,7 +2538,7 @@ function ui_setupChannelTabs () {
 			tab.smallSection = ht_appendCollapsedVideoSection(container, tab.title, tab.id);
 			tab.smallContainer = I("c-" + tab.id)
 		});
-		tabBar.style.display = "block";
+		tabBar.style.display = "flex";
 	}
 }
 function ui_addChannelTabHeader (name, id) {
@@ -3235,7 +3197,6 @@ function onToggleButton (button, callback) {
 function onBrowseTab (tabID) {
 	[].forEach.call(I("chTabBar").children, function (header) { header.removeAttribute("selected"); });
 	if (tabID == "overview") {
-		console.log("Browsing overview!");
 		yt_channel.uploads.tabs.forEach(function (tab) {
 			tab.section.style.display = "none";
 			if (tab.smallSection) tab.smallSection.style.display = "block";
@@ -3243,7 +3204,6 @@ function onBrowseTab (tabID) {
 		I("h-overview").setAttribute("selected", "");
 	} else {
 		var selectedTab = yt_channel.uploads.tabs.find(function (t) { return t.id == tabID; });
-		console.log("Browsing tab " + selectedTab.title);
 		yt_channel.uploads.tabs.forEach(function (tab) {
 			tab.section.style.display = "none";
 			if (tab.smallSection) tab.smallSection.style.display = "none";
