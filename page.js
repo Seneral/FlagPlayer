@@ -1616,7 +1616,7 @@ function yt_extractVideoMetadata() {
 
 	ex_interpretMetadata();
 	ui_setVideoMetadata();
-	//ui_setupMediaSession();
+	ui_setupMediaSession();
 }
 
 /* -------------------- */
