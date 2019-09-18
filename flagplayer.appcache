@@ -1,0 +1,13 @@
+CACHE MANIFEST
+# Version 1.0
+
+CACHE: 
+index.html
+page.js
+style.css
+favicon.ico
+favicon-16.png
+favicon-32.png
+
+NETWORK:
+FALLBACK:
