@@ -80,6 +80,14 @@ function I (i) { return document.getElementById(i); }
 function S (i,v) { localStorage.setItem(i,v); }
 function G (i) { return localStorage.getItem(i); }
 function setDisplay (i,v) { I(i).style.display = v; }
+Element.prototype.toggleAttr = function toggleAttr(name) {
+    if (this.hasAttribute(name)) {
+    	this.removeAttribute(name);
+    	return false;
+    }
+	this.setAttribute(name, "");
+	return true;
+};
 
 
 /* -------------------- */
@@ -173,14 +181,14 @@ var yt_channel; // meta {}, upload {}
 	// meta: title, channelID, profileImg, bannerImg, url, subscribers, description, links { title icon link }
 	// upload: videos [video {}], conToken
 	// video: title, videoID, views, length, thumbnailURL uploadedTimeAgoText
-// Cache
-var yt_signTransCache = {}; // [base.js url] { global function name, parameter value }
 
 /* TEMPORARY STATE */
 var yt_playlistLoaded; // Event triggered when playlist is fully loaded
+var ct_isAdvancedCorsHost; // Boolean: Supports cookie-passing for (with others) comments
 var ct_traversedHistory; // Prevent messing with history when traversing
 var ct_timerAutoplay; // Timer ID for video end autoplay timer
-var ui_cntMouseUmoving = 0; // For control bar retraction when mouse is unmoving
+var ui_controlBarCnt; // For control bar retraction when mouse is unmoving
+var ui_controlBarShown; // Boolean whether control bar just got brought up due to click (max 50ms ago)
 var ui_timerIndicator; // Timer ID for the current temporary indicator (pause/plax) on the video screen
 var ui_dragSlider; // Currently dragging a slider?
 var ui_dragSliderElement; // Currently dragged slider element 
@@ -189,13 +197,13 @@ var md_timerCheckBuffering; // Timer ID for next media buffering check (and star
 var md_attemptPlayStarted; // Flag to prevent multiple simultaneous start play attempts
 var md_attemptPause; // Flag to indicate play start attempt is to be aborted
 
-/* SETTINGS STATE */
-var interfaceLang = "en;q=0.9";
-var contentLang = "en;q=0.9"; // content language (auto-translate) - * should remove translation
-var ytHost = "https://www.youtube.com";
-var ytHostMobile = "https://m.youtube.com";
-var advancedCorsHost = undefined; // Boolean: Supports cookie-passing for (with others) comments
-var corsAPIHost = "https://cors-anywhere.herokuapp.com/"; // Default value only
+/* CONSTANTS */
+const LANG_INTERFACE = "en;q=0.9";
+const LANG_CONTENT = "en;q=0.9"; // content language (auto-translate) - * should remove translation
+const HOST_YT = "https://www.youtube.com";
+const HOST_YT_MOBILE = "https://m.youtube.com";
+const HOST_YT_IMG = "https://i.ytimg.com/vi/"; // https://i.ytimg.com/vi/ or https://img.youtube.com/vi/
+const HOST_CORS = "https://cors-anywhere.herokuapp.com/"; // Default value only
 //"http://localhost:8080/";
 //"https://cors-anywhere.herokuapp.com/"; 
 //"http://allow-any-origin.appspot.com/";
@@ -244,7 +252,7 @@ function ct_loadPreferences () {
 	ct_pref.playlistRandom = G("prefPlaylistRandom") == "false"? false : true;
 	ct_pref.autoplay = G("prefAutoplay") == "false"? false : true;
 	ct_pref.theme = G("prefTheme") || "DARK";
-	ct_pref.corsAPIHost = G("prefCorsAPIHost") || corsAPIHost;
+	ct_pref.corsAPIHost = G("prefCorsAPIHost") || HOST_CORS;
 	ct_pref.relatedVideos = G("prefRelated") || "ALL";
 	ct_pref.filterCategories = (G("prefFilterCategories") || "").split(",").map(c => parseInt(c));
 	ct_pref.filterHideCompletely = G("prefFilterHideCompletely") == "false"? false : true;
@@ -328,7 +336,7 @@ function ct_newPageState () { // Register new page
 function ct_updatePageState () { // Update page with new information
 	var url = new URL(window.location.href);
 	var state = history && history.state? history.state : {};
-	yt_url = ytHost;
+	yt_url = HOST_YT;
 	
 	if (ct_page == Page.Home)
 		state.title = "Home | FlagPlayer";
@@ -367,7 +375,7 @@ function ct_updatePageState () { // Update page with new information
 		url.searchParams.set("list", yt_playlistID);
 		if (ct_page == Page.Playlist) yt_url += "/playlist?list=" + yt_playlistID;
 		if (ct_page == Page.Media) yt_url += "&list=" + yt_playlistID;
-		(I("youtubePLLink") || {}).href = ytHost + "/playlist?list=" + yt_playlistID;
+		(I("youtubePLLink") || {}).href = HOST_YT + "/playlist?list=" + yt_playlistID;
 	} else url.searchParams.delete("list");
 	
 	// TODO: only delete if not for current video
@@ -379,6 +387,14 @@ function ct_updatePageState () { // Update page with new information
 	if (history && history.replaceState) history.replaceState(state, state.title, url.href);
 	else window.location = url; // Triggers reload, not perfect but better than no link update
 	[].forEach.call(document.getElementsByClassName("youtubeLink"), function (l) { l.href = yt_url });
+}
+function ct_getNavLink(navID) {
+	var url = new URL(window.location);
+	url.search = "";
+	if (yt_playlistID) url.searchParams.set("list", yt_playlistID);
+	var match = navID.match(/^(.*?)=(.*)$/);
+	if (match) url.searchParams.set(match[1], match[2]);
+	return url.href;
 }
 function ct_beforeNav () {
 	ct_resetContent();
@@ -500,7 +516,7 @@ function ct_getVideoPlIndex () { // Return -1 on fail so that pos+1 will be 0
 
 function ct_navSearch(searchTerms) {
 	var plMatch = searchTerms.match(/(PL[a-zA-Z0-9_-]{32})/);
-	var vdMatch = searchTerms.match(/([a-zA-Z0-9_-]{11})/);
+	var vdMatch = searchTerms.match(/(v=[a-zA-Z0-9_-]{11})/);
 	if (plMatch) ct_loadPlaylist(plMatch[0]);
 	else {
 		ct_beforeNav();
@@ -912,7 +928,7 @@ function yt_browse (subPath, callback, peek) {
 	if (peek) page = {};
 	else page = yt_page = {};
 		
-	WGET_CORS(ytHost + subPath, function(response, xhttp) {
+	WGET_CORS(HOST_YT + subPath, function(response, xhttp) {
 		page.html = response;
 
 		try { 
@@ -947,7 +963,7 @@ function yt_browse (subPath, callback, peek) {
 		page.secrets.variantsChecksum = page.configParams.VARIANTS_CHECKSUM;
 		
 		page.cookies = {};
-		if (advancedCorsHost)
+		if (ct_isAdvancedCorsHost)
 			yt_extractCookies(xhttp.getResponseHeader("x-set-cookies"));
 		
 		console.log("YT Page: ", page);
@@ -965,7 +981,7 @@ function yt_navigate (subPath, callback, itctToken) {
 	// TODO: Session Data can vary between page types - don't assume itct&csn
 	yt_setNavCookie(subPath, "itct=" + itctToken + "&csn=" + yt_page.secrets.csn);
 
-	WGET_CORS(ytHost + subPath, function(response, xhttp) {
+	WGET_CORS(HOST_YT + subPath, function(response, xhttp) {
 		// Parse response object
 		try { yt_page.object = JSON.parse(response); 
 		} catch (e) { console.error("Failed to get parse page response!", e, { text: response }); }
@@ -974,7 +990,7 @@ function yt_navigate (subPath, callback, itctToken) {
 		} catch (e) { console.error("Failed to get initial data!", e, { text: response }); }
 
 		yt_updateNavigation (yt_page.initialData);
-		if (advancedCorsHost)
+		if (ct_isAdvancedCorsHost)
 			yt_extractCookies(xhttp.getResponseHeader("x-set-cookies"));
 		
 		console.log("YT Page: ", yt_page);
@@ -1012,7 +1028,7 @@ function yt_getCookieString () {
 function yt_getRequestHeadersBrowser (cookies) {
 	return [
 		{ header: "accept", value: "*/*" },
-		{ header: "accept-language", value: interfaceLang || "*" },
+		{ header: "accept-language", value: LANG_INTERFACE || "*" },
 		{ header: "upgrade-insecure-requests", value: "1" },
 		{ header: "x-cookies", value: cookies? yt_getCookieString() : "" },
 		{ header: "x-mode", value: "navigate" },
@@ -1028,7 +1044,7 @@ function yt_getRequestHeadersYoutube (content) {
 	if (!yt_page || !yt_page.secrets) return [];
 	return [
 		{ header: "accept", value: "*/*" },
-		{ header: "accept-language", value: interfaceLang || "*" },
+		{ header: "accept-language", value: LANG_INTERFACE || "*" },
 		{ header: "cache-control", value: "no-cache" },
 		{ header: "pragma", value: "no-cache" },
 		{ header: "content-type", value: content },
@@ -1136,7 +1152,7 @@ function yt_parseAJAXVideo (vdData) {
 }
 function yt_loadListData(addElements, initialLoad, supressLoader) {
 	return function (pagedContent) { 
-		var requestURL = ytHost + "/list_ajax?action_get_list=1&style=json&list=" + pagedContent.data.listID + "&index=" + pagedContent.index;
+		var requestURL = HOST_YT + "/list_ajax?action_get_list=1&style=json&list=" + pagedContent.data.listID + "&index=" + pagedContent.index;
 		PAGED_REQUEST(pagedContent, "GET", requestURL, false, function(uploadsData) {
 			// Parsing
 			try { pagedContent.data.lastPage = JSON.parse(uploadsData);
@@ -1206,7 +1222,7 @@ function yt_loadSearchPage () {
 	if (!yt_searchTerms) return;
 	// Load Search Page
 	yt_searchResults = undefined;
-	var requestURL = ytHost + "/results?pbj=1&search_query=" + encodeURIComponent(yt_searchTerms);
+	var requestURL = HOST_YT + "/results?pbj=1&search_query=" + encodeURIComponent(yt_searchTerms);
 	yt_browse("/results?pbj=1&search_query=" + encodeURIComponent(yt_searchTerms), function() {
 		if (ct_page != Page.Search) return;
 		yt_searchResults = {};
@@ -1218,7 +1234,7 @@ function yt_loadSearchPageResults(pagedContent) {
 }
 /* AJAX Version - lighter, but only video results */
 function yt_loadSearchResultsAJAX(pagedContent) {
-	var requestURL = ytHost + "/search_ajax?style=json&search_query=" + encodeURIComponent(yt_searchTerms) + "&page=" + (pagedContent.index+1);	
+	var requestURL = HOST_YT + "/search_ajax?style=json&search_query=" + encodeURIComponent(yt_searchTerms) + "&page=" + (pagedContent.index+1);	
 	PAGED_REQUEST(pagedContent, "POST", requestURL, false, function(searchResultData) {
 		// Parsing
 		if (!yt_searchResults) yt_searchResults = { hits: 0, videos: [] };
@@ -1401,8 +1417,8 @@ function yt_extractChannelPageTabs (initialData) {
 }
 function yt_loadChannelPageUploads(pagedContent) {
 	var requestURL;
-	if (yt_page.isDesktop) requestURL = ytHost + "/browse_ajax?" + "ctoken=" + pagedContent.data.conToken + "&continuation=" + pagedContent.data.conToken + "&itct=" + pagedContent.data.itctToken;
-	else requestURL = ytHostMobile + yt_channel.url + "?pbj=1&" + "ctoken=" + pagedContent.data.conToken + "&itct=" + pagedContent.data.itctToken;
+	if (yt_page.isDesktop) requestURL = HOST_YT + "/browse_ajax?" + "ctoken=" + pagedContent.data.conToken + "&continuation=" + pagedContent.data.conToken + "&itct=" + pagedContent.data.itctToken;
+	else requestURL = HOST_YT_MOBILE + yt_channel.url + "?pbj=1&" + "ctoken=" + pagedContent.data.conToken + "&itct=" + pagedContent.data.itctToken;
 	PAGED_REQUEST(pagedContent, "GET", requestURL, true, function(uploadsData) {
 		// Parsing
 		try { var obj = JSON.parse(uploadsData); 
@@ -1466,7 +1482,7 @@ function yt_loadVideoData() {
 			} else {
 				yt_video.blocked = true;
 				console.warn("Video is blocked in your country!");
-				WGET_CORS("https://youtube.com/get_video_info?ps=default&video_id=" + yt_videoID, function(playerArgs) {
+				WGET_CORS(HOST_YT + "/get_video_info?ps=default&video_id=" + yt_videoID, function(playerArgs) {
 					yt_page.config = { args: {} };
 					playerArgs.split('&').forEach(s => { s = s.split('='); 
 						yt_page.config.args[s[0]] = decodeURIComponent(s[1].replace(/\+/g, '%20')); 
@@ -1647,7 +1663,7 @@ function yt_extractRelatedVideoData() {
 	ui_addRelatedVideos(0);	
 
 	// Setup further loading
-	if (yt_video.related.conToken && advancedCorsHost) { // Advanced host required for cookies
+	if (yt_video.related.conToken && ct_isAdvancedCorsHost) { // Advanced host required for cookies
 		ct_registerPagedContent("RV", I("relatedContainer"), yt_loadMoreRelatedVideos, ct_isDesktop? 100 : false);
 		ct_checkPagedContent();
 	}
@@ -1655,7 +1671,7 @@ function yt_extractRelatedVideoData() {
 function yt_loadMoreRelatedVideos (pagedContent) {
 	if (ct_pref.relatedVideos != "ALL") return; // Still registered to allow it to load immediately when settings change
 	
-	var requestURL = ytHost + "/related_ajax?" + 
+	var requestURL = HOST_YT + "/related_ajax?" + 
 		"&ctoken=" + yt_video.related.conToken + "&continuation=" + yt_video.related.conToken + "&itct=" + yt_video.related.itctToken; 
 	PAGED_REQUEST(pagedContent, "POST", requestURL, true, function(relatedData) {
 		// Parsing
@@ -1755,7 +1771,7 @@ function yt_extractVideoCommentData () {
 	
 	yt_video.commentData.comments = [];
 
-	if (yt_video.commentData.conToken && advancedCorsHost) { // Advanced host required for cookies
+	if (yt_video.commentData.conToken && ct_isAdvancedCorsHost) { // Advanced host required for cookies
 		ct_registerPagedContent("CM", I("vdCommentList"), yt_loadMoreComments, 100, yt_video.commentData);
 		ct_checkPagedContent();
 	}
@@ -1785,7 +1801,7 @@ function yt_loadMoreComments (pagedContent) {
 		return;
 	
 	var isReplyRequest = pagedContent.data.replies != undefined;
-	var requestURL = ytHost + "/comment_service_ajax?" + 
+	var requestURL = HOST_YT + "/comment_service_ajax?" + 
 		(isReplyRequest? "action_get_comment_replies" : "action_get_comments") + "=1&pbj=1" + 
 		"&ctoken=" + pagedContent.data.conToken + (pagedContent.data.conToken.length < 3000? "&continuation=" + pagedContent.data.conToken : "") +  "&itct=" + yt_video.commentData.itctToken; 
 	PAGED_REQUEST(pagedContent, "POST", requestURL, true, function(commentData) {
@@ -1872,21 +1888,15 @@ function yt_extractVideoCommentObject (data, response) {
 /* ------------------------------------------------- */
 
 function yt_getSignCache (jsID) {
-	return undefined;
-	if (yt_signTransCache[jsID] != undefined) 
-		return yt_signTransCache[jsID];
 	var cache = G("jscache" + jsID);
-	if (cache != undefined) {
-		cache = cache.split(',').map(c => {
+	if (cache) {
+		return cache.split(',').map(c => {
 			var data = c.split('+');
 			return { func: data[0], value: data[1] };
 		});
-		yt_signTransCache[jsID] = cache;
 	}
-	return cache;
 }
 function yt_setSignCache (jsID, transform) {
-	yt_signTransCache[jsID] = transform;
 	S("jscache" + jsID, transform.map(t => t.func + "+" + t.value).join(','));
 }
 
@@ -1921,11 +1931,11 @@ function yt_decodeStreams () {
 	// Decode video stream data
 	if (yt_video.useCipher) {
 		var jsID = yt_page.config.assets.js;
-		var signTransformation;
-		if ((signTransformation = yt_getSignCache(jsID)) == undefined) {
-			// Extract and cache signing transformation from large base.js (2MB download)
-			WGET_CORS("https://youtube.com" + jsID, function(jsSRC) {
-				yt_setSignCache(jsID, signTransformation = yt_extractSignTransform(jsSRC));
+		var signTransformation = yt_getSignCache(jsID);
+		if (!signTransformation) { // Extract and cache signing transformation from large base.js (2MB download)
+			WGET_CORS(HOST_YT + jsID, function(jsSRC) {
+				signTransformation = yt_extractSignTransform(jsSRC)
+				yt_setSignCache(jsID, signTransformation);
 				yt_signStreams(signTransformation);
 				yt_processStreams();
 			});
@@ -2167,8 +2177,8 @@ function ui_indicatePlay () {
 	ui_timerIndicator = setTimeout(() => I("playIndicator").removeAttribute("trigger"), 500);
 }
 function ui_setPoster () {
-	I("videoPoster").data = !yt_videoID? "" : ("https://img.youtube.com/vi/" + yt_videoID + "/maxresdefault.jpg");
-	I("videoPosterFallback").data = !yt_videoID? "" : ("https://img.youtube.com/vi/" + yt_videoID + "/hqdefault.jpg");
+	I("videoPoster").data = !yt_videoID? "" : (HOST_YT_IMG + yt_videoID + "/maxresdefault.jpg");
+	I("videoPosterFallback").data = !yt_videoID? "" : (HOST_YT_IMG + yt_videoID + "/hqdefault.jpg");
 }
 
 function ui_setupMediaSession () {
@@ -2348,8 +2358,11 @@ function ui_setVideoMetadata() {
 		I("vdDownvotes").innerText = "---";
 		I("vdSentiment").parentElement.style.display = "none";
 	}
-	I("vdUploadLink").setAttribute("navigation", yt_video.meta.uploader.userID? 
-		("u" + yt_video.meta.uploader.userID) : ("c" + yt_video.meta.uploader.channelID));
+	var uploaderNav = yt_video.meta.uploader.userID? ("u=" + yt_video.meta.uploader.userID) : ("c=" + yt_video.meta.uploader.channelID);
+	[].forEach.call(document.getElementsByClassName("vdUploadLink"), function (link) {
+		link.setAttribute("navigation", uploaderNav);
+		link.href = ct_getNavLink(uploaderNav);
+	});
 	I("vdUploaderImg").src = yt_video.meta.uploader.profileImg;
 	I("vdUploaderName").innerText = yt_video.meta.uploader.name;
 	I("vdUploaderSubscribers").innerText = "SUBSCRIBE " + yt_video.meta.uploader.subscribers;
@@ -2434,7 +2447,7 @@ function ui_addComments (container, comments, startIndex, finished) {
 	if (!startIndex) startIndex = 0;
 	for(var i = startIndex; i < comments.length; i++) {
 		var comm = comments[i];
-		ht_appendCommentElement(container, comm.id, comm.author.userID? ("u" + comm.author.userID) : ("c" + comm.author.channelID), 
+		ht_appendCommentElement(container, comm.id, comm.author.userID? ("u=" + comm.author.userID) : ("c=" + comm.author.channelID), 
 			comm.author.profileImg, comm.author.name, comm.publishedTimeAgoText, ui_formatDescription(comm.text), 
 			comm.likes, comm.replyData? comm.replyData.count : undefined);
 	}
@@ -2716,7 +2729,7 @@ function ui_addLoadingIndicator (container, inside) {
 	else container.parentNode.insertBefore(loader, container.nextSibling);
 	loader.outerHTML = 
 		'<div class="loadingIndicator"> \n' +
-		'<svg viewBox="0 0 48 48"><use href="#svg_loadCircle"/></svg> \n' +
+			'<svg viewBox="0 0 48 48"><use href="#svg_loadCircle"/></svg> \n' +
 		'</div> \n';
 }
 function ui_removeLoadingIndicator (container) {
@@ -2834,7 +2847,7 @@ function ui_updateSlider (mouse) {
 	}
 }
 function ui_handleDropdown (dropdown, event) {
-	var click = event.type == "click";
+	var click = event.type == "click"; // Else focusout
 	if (!ui_isInCascade(dropdown, click? document.activeElement : event.relatedTarget, 3)) {
 		dropdown.removeAttribute("toggled"); // Focus not in dropdown - close
 	} else if (click && dropdown.hasAttribute("toggled")) {
@@ -2919,43 +2932,34 @@ function ui_updateTimelinePeeking (mouse) {
 /* -------------------- */
 
 function ui_showControlBar () {
-	ui_cntMouseUmoving = 0;
+	ui_controlBarCnt = 0;
 	controlBar.removeAttribute("retracted");
+	ct_temp.showControlBar = true;
+}
+function ui_hideControlBar () {
+	ui_controlBarCnt = 10*3;
+	controlBar.setAttribute("retracted", "");
+	ct_temp.showControlBar = false;
+	I("volumeSlider").parentElement.removeAttribute("interacting");
 }
 function ui_updateControlBar (mouse) { // MouseEvent + 100ms Interval
-	if (ct_temp.options) {
-		ui_cntMouseUmoving = 0;
-		controlBar.removeAttribute("retracted");
+	if (ct_temp.options) { // Force show when options are open
+		ui_showControlBar();
 		return;
 	}
-	if (mouse) {
-		if (ct_isPlaying()) {
+	if (ct_isPlaying()) {
+		if (mouse) { // Mouse Action - Show on mouse move or click
 			if (ui_isMouseIn(mouse, sec_player)) {
 				if (mouse.type != "mousemove" || mouse.movementX * mouse.movementX + mouse.movementY * mouse.movementY > 0.1) {
-					ui_cntMouseUmoving = 0;
-					controlBar.removeAttribute("retracted");
+					ui_showControlBar();
+					ui_controlBarShown = true;
 				}
-			}
-			else {
-				ui_cntMouseUmoving = 10*3;
-				controlBar.setAttribute("retracted", "");
-				I("volumeSlider").parentElement.removeAttribute("interacting");
-			}
-		} else {
-			controlBar.removeAttribute("retracted");
+			} else ui_hideControlBar();
+		} else { // Interval - Hide when mouse unmoved
+			if (ui_controlBarCnt > 10*3) ui_hideControlBar();
+			else ui_controlBarCnt++;
 		}
-	} else {
-		if (ct_isPlaying()) {
-			if (ui_cntMouseUmoving > 10*3) {
-				controlBar.setAttribute("retracted", "");
-				I("volumeSlider").parentElement.removeAttribute("interacting");
-			}
-			ui_cntMouseUmoving++;
-		} else {
-			controlBar.removeAttribute("retracted");
-			ui_cntMouseUmoving = 0;
-		}
-	}
+	} else ui_showControlBar(); // Force show on pause / buffering / seeking
 }
 
 
@@ -3189,9 +3193,8 @@ function onLoadReplies (container, commentID) {
 }
 function onToggleButton (button, callback) {
 	button.onclick = function () {
-		if (button.hasAttribute("toggled")) button.removeAttribute("toggled");
-		else button.setAttribute("toggled", "");
-		if (callback) callback(button.hasAttribute("toggled"));
+		var toggled = button.toggleAttr("toggled");
+		if (callback) callback(toggled);
 	}
 }
 function onBrowseTab (tabID) {
@@ -3223,8 +3226,8 @@ function onMouseClick (mouse) {
 	var overridePlayer = false;
 	var target;
 
+	// Handle click outside of fullscreen panel to close it
 	if (mouse.target.classList.contains("fullscreenPanel")) {
-		// Close Fullscreen panel
 		if (mouse.target.id == "settingsPanel") ui_closeSettings();
 		else mouse.target.style.display = "none";
 		mouse.preventDefault();
@@ -3233,85 +3236,64 @@ function onMouseClick (mouse) {
 	
 	// Handle Close Options when clicked outside of opened panel or button
 	if (ct_temp.options && !ui_hasCascadedID(mouse.target, "optionsButton", 3) && !ui_hasCascadedID(mouse.target, "optionsPanel", 4)) {
-		ct_temp.options = false;
-		ui_updateOptionsState();
+		onToggleOptions();
 		overridePlayer = true;
-	}
-
-	// Handle generic controls tagged with toggle
-	if (mouse.target && (target = ui_hasCascadedClass(mouse.target, "toggle", 3))) {
-		if (target.hasAttribute("toggled")) target.removeAttribute("toggled");
-		else target.setAttribute("toggled", "");
-		mouse.preventDefault();
 	}
 	
 	// Handle Media Player Click
 	if (mouse.target.classList.contains("controlOverlay")) {
-		if (!overridePlayer) 
+		// Don't register touch when control bar isn't shown (it will be shown afterwards, though)
+		var isTouch = mouse.sourceCapabilities && mouse.sourceCapabilities.firesTouchEvents;
+		if (!overridePlayer && (ct_temp.showControlBar || !isTouch))  
 			ct_mediaPlayPause(!ct_paused, true);
 		mouse.preventDefault();
 	}
 
+	// Show control bar after click has been registered above
+	ui_updateControlBar(mouse);
+
 	// Handle In-Page Navigation
-	if (mouse.target && (mouse.target.hasAttribute("nav"))) {
-		var target = mouse.target;
-		while(!target.hasAttribute("navigation")) 
-			target = target.parentElement;
-		var match = target.getAttribute("navigation").match(/^(v|u|c|s|pl)(.*)$/);
+	if (mouse.target && mouse.target.hasAttribute("navigation")) {
+		var match = mouse.target.getAttribute("navigation").match(/^(.*?)=(.*)$/);
 		if (match) {
-			if (match[1] == "v") 
-				ct_navVideo(match[2]);
-			else if (match[1] == "u") 
-				ct_navChannel({ user: match[2] });
-			else if (match[1] == "c") 
-				ct_navChannel({ channel: match[2] });
-			else if (match[1] == "s") 
-				ct_navSearch(match[2]);
-			else if (match[1] == "pl") 
-				ct_loadPlaylist(match[2]);
+			switch (match[1]) {
+				case "v":  ct_navVideo(match[2]); break;
+				case "u": ct_navChannel({ user: match[2] }); break;
+				case "c": ct_navChannel({ channel: match[2] }); break;
+				case "q": ct_navSearch(match[2]); break;
+				case "list": ct_loadPlaylist(match[2]); break;
+				case "tab": onBrowseTab(match[2]); break;
+				default: break;
+			}
 		}
 		mouse.preventDefault();
 	}
 
-	// Handle In-Text Text Collapser
+	// Handle Toggles
+	if (mouse.target && (target = ui_hasCascadedClass(mouse.target, "toggle", 3)))
+		target.toggleAttr("toggled");
+
+	// Handle Collapser
 	if (target = ui_hasCascadedClass(mouse.target, "collapser", 4)) {
 		var collapsable = ui_hasCascadedClass(target, "collapsable", 4);
-		if (collapsable.hasAttribute("collapsed")) {
-			if (target.hasAttribute("less-text")) target.innerText = target.getAttribute("less-text");
-			collapsable.removeAttribute("collapsed");
-		} else {
-			if (target.hasAttribute("more-text")) target.innerText = target.getAttribute("more-text");
-			collapsable.setAttribute("collapsed", "");
-		}
-		if (collapsable.oncollapse) collapsable.oncollapse(); // For playlist
+		var text = collapsable.toggleAttr("collapsed")? "more-text" : "less-text";
+		if (target.hasAttribute(text)) target.innerText = target.getAttribute(text);
 	}
 
-	// Handle In-Text Content Loader
+	// Handle Content Loader
 	if (target = ui_hasCascadedClass(mouse.target, "contentLoader", 2)) {
-		var loader = target;
-		var container = loader.parentElement.className.includes("contentContainer")? loader.parentElement 
-				: loader.parentElement.getElementsByClassName("contentContainer")[0];
-		new Function ("container", loader.getAttribute("load-content"))(container);
+		var container = target.parentElement.className.includes("contentContainer")? target.parentElement 
+				: target.parentElement.getElementsByClassName("contentContainer")[0];
+		new Function ("container", target.getAttribute("load-content"))(container);
 		container.setAttribute("loaded", "");
-		if (loader.className.includes("collapser")) // Only act as collapser from now on
-			loader.classList.remove("contentLoader");
+		if (target.className.includes("collapser")) // Only act as collapser from now on
+			target.classList.remove("contentLoader");
 	}
 }
 function onMouseUpdate (mouse) {
 	ui_updateControlBar(mouse);
 	ui_updateTimelinePeeking(mouse);
 	ui_updateSlider(mouse);
-
-	// Try to display target adress (unsupported by most browser)
-	var target = mouse.target;
-	if (target && (target.hasAttribute("nav") || target.hasAttribute("navigation"))) {
-		while(!target.hasAttribute("navigation")) 
-			target = target.parentElement;
-		var match = target.getAttribute("navigation").match(/^(v|u|c|s)(.*)$/);
-		if (match) window.status = "index.html?" + match[1] + "=" + match[2];
-	} else if (window.status.startsWith("index.html?")) {
-		window.status = "";
-	}
 }
 function onMouseDown (mouse) {
 	if (ui_isMouseIn(mouse, timelineControl))
@@ -3324,7 +3306,6 @@ function onMouseLeave (mouse) {
 	ui_updateSlider(mouse);
 }
 function onMouseUp (mouse) {
-	ui_updateControlBar(mouse);
 	ui_updateTimelinePeeking(mouse);
 	ui_updateSlider(mouse);
 }
@@ -3790,9 +3771,9 @@ function PAGED_REQUEST (pagedContent, method, url, authenticate, callback, supre
 }
 function WGET_CORS(url, callback, headers, body) {
 	WREQ("GET", ct_pref.corsAPIHost + url, function (response, xhttp) { 
-		if (advancedCorsHost == undefined) {
-			try { advancedCorsHost = xhttp.getAllResponseHeaders().includes("x-set-cookies"); }
-			catch (e) { advancedCorsHost = false; }
+		if (ct_isAdvancedCorsHost == undefined) {
+			try { ct_isAdvancedCorsHost = xhttp.getAllResponseHeaders().includes("x-set-cookies"); }
+			catch (e) { ct_isAdvancedCorsHost = false; }
 		}
 		callback (response, xhttp); 
 	}, headers, body);
@@ -3873,48 +3854,50 @@ function ht_getVideoPlaceholder () {
 }
 function ht_appendVideoElement (container, index, id, length, prim, sec, tert) {
 	container.insertAdjacentHTML ("beforeEnd",
-		'<div class="liElement" nav navigation="v' + id + '" videoID="' + id + '">' + 
+		'<div class="liElement" videoID="' + id + '">' + 
+			'<a class="overlayLink" navigation="v=' + id + '" href="' + ct_getNavLink("v" + id) + '"></a>' + 
 (index == undefined?	'' :
-			'<div class="liIndex" nav>' + index + '</div>') + 
-			'<div class="liThumbnail" nav>' + 
-				'<img class="liThumbnailImg" nav src="https://i.ytimg.com/vi/' +  id + '/default.jpg">' +
-				'<span class="liThumbnailInfo" nav> ' +  length + ' </span>' +
+			'<div class="liIndex">' + index + '</div>') + 
+			'<div class="liThumbnail">' + 
+				'<img class="liThumbnailImg" src="' + HOST_YT_IMG +  id + '/default.jpg">' +
+				'<span class="liThumbnailInfo"> ' +  length + ' </span>' +
 			'</div>' + 
-			'<div class="liDetail selectable" nav>' + 
-				'<span class="twoline liPrimary" nav>' + prim + '</span>' +
-				'<span class="oneline liSecondary" nav>' + sec + '</span>' +
+			'<div class="liDetail selectable">' + 
+				'<span class="twoline liPrimary">' + prim + '</span>' +
+				'<span class="oneline liSecondary">' + sec + '</span>' +
 (tert == undefined?	'' :
-				'<span class="oneline liTertiary" nav>' + tert + '</span>') +
+				'<span class="oneline liTertiary">' + tert + '</span>') +
 			'</div>' + 
 		'</div>');
 	return container.lastElementChild;
 }
-function ht_appendPlaylistElement (container, plID, thumbID, prim, sec, tert) {
+function ht_appendPlaylistElement (container, id, thumbID, prim, sec, tert) {
 	container.insertAdjacentHTML ("beforeEnd",
-		'<div class="liElement" nav navigation="pl' + plID + '">' + 
-			'<div class="liThumbnail" nav>' + 
-				'<img class="liThumbnailImg" nav src="https://i.ytimg.com/vi/' +  thumbID + '/default.jpg">' +
+		'<div class="liElement">' + 
+			'<a class="overlayLink" navigation="list=' + id + '" href="' + ct_getNavLink("list" + id) + '"></a>' + 
+			'<div class="liThumbnail">' + 
+				'<img class="liThumbnailImg" src="' + HOST_YT_IMG +  thumbID + '/default.jpg">' +
 			'</div>' + 
-			'<div class="liDetail selectable" nav>' + 
-				'<span class="twoline liPrimary" nav>' + prim + '</span>' +
-				'<span class="oneline liSecondary" nav>' + sec + '</span>' +
-				'<span class="oneline liTertiary" nav>' + tert + '</span>' +
+			'<div class="liDetail selectable">' + 
+				'<span class="twoline liPrimary">' + prim + '</span>' +
+				'<span class="oneline liSecondary">' + sec + '</span>' +
+				'<span class="oneline liTertiary">' + tert + '</span>' +
 			'</div>' + 
-			'<button class="liAction" id="playlistContextAction">' + 
-				'<svg viewBox="6 6 36 36" class="icon"><use href="#svg_vdots"/></svg>' +
-			'</button>' + 
+//			'<button class="liAction" id="playlistContextAction">' + 
+//				'<svg viewBox="6 6 36 36" class="icon"><use href="#svg_vdots"/></svg>' +
+//			'</button>' + 
 		'</div>');
 	return container.lastElementChild;
 }
 function ht_appendTabHeader (container, label, id) {
 	container.insertAdjacentHTML ("beforeEnd",
-		'<button class="tabHeader" id="h-' + id + '" onclick="onBrowseTab(&quot;' + id +  '&quot;)">' + label + '</button>');
+		'<button class="tabHeader" id="h-' + id + '" navigation="tab=' + id +  '">' + label + '</button>');
 	return container.lastElementChild;
 }
 function ht_appendCollapsedVideoSection (container, label, id) {
 	container.insertAdjacentHTML ("beforeEnd",
 		'<div class="videoSection">' +
-			'<button class="videoSectionHeader" onclick="onBrowseTab(&quot;' + id +  '&quot;)">' + label + '</button>' +
+			'<button class="videoSectionHeader" navigation="tab=' + id +  '">' + label + '</button>' +
 			'<div class="videoList" id="c-' + id + '"></div>' +
 		'</div>');
 	return container.lastElementChild;
@@ -3936,7 +3919,7 @@ function ht_appendChannelLinkElement (container, link, icon, title) {
 		'</div>');
 	return container.lastElementChild;
 }
-function ht_appendCommentElement (container, commentID, authorID, authorIMG, authorName, dateText, commentText, likes, replies) {
+function ht_appendCommentElement (container, commentID, authorNav, authorIMG, authorName, dateText, commentText, likes, replies) {
 	var repliesContainer = "";
 	if (replies) {
 		var replyText = (replies > 1? replies + ' replies' : '1 reply');
@@ -3945,12 +3928,12 @@ function ht_appendCommentElement (container, commentID, authorID, authorIMG, aut
 			'<button class="cmToggleReplies collapser contentLoader" load-content="onLoadReplies(container, &quot;' + commentID + '&quot;)"' + 
 						'more-text="Show ' + replyText + '" less-text="Hide ' + replyText + '">Show ' + replyText + '</button>' +
 			'<div class="contentContainer collapsableContainer">' +
-			'<button class="cmToggleReplies contentLoader" load-content="onLoadReplies(container, &quot;' + commentID + '&quot;)" style="display: none;">Load more replies</button>' +
+				'<button class="cmToggleReplies contentLoader" load-content="onLoadReplies(container, &quot;' + commentID + '&quot;)" style="display: none;">Load more replies</button>' +
 			'</div>' +
 		'</div>';
 	}
 	container.insertAdjacentHTML ("beforeEnd",
-		'<div class="cmContainer" navigation="' + authorID + '">' + 
+		'<div class="cmContainer">' + 
 			'<button class="contextAction script dropdown left down">' +
 				'<svg viewBox="6 6 36 36"><use href="#svg_vdots"/></svg>' +
 				'<div class="dropdownContent">' +
@@ -3958,11 +3941,14 @@ function ht_appendCommentElement (container, commentID, authorID, authorIMG, aut
 				'</div>' +
 			'</button>' +
 			'<div class="cmProfileColumn">' +
-				'<img class="cmProfileImg profileImg" nav src="' + authorIMG + '">' +
+				'<a class="overlayLink" navigation="' + authorNav + '" href="' + ct_getNavLink(authorNav) + '"></a>' + 
+				'<img class="cmProfileImg profileImg" src="' + authorIMG + '">' +
 			'</div>' +
 			'<div class="cmContentColumn selectable">' +
-				'<span class="cmAuthorName" nav>' + authorName + '</span>' +
-				'<span class="cmPostedDate" nav>' + dateText + '</span>' +
+				'<a navigation="' + authorNav + '" href="' + ct_getNavLink(authorNav) + '">' + 
+					'<span class="cmAuthorName">' + authorName + '</span>' +
+				'</a>' +
+				'<span class="cmPostedDate">' + dateText + '</span>' +
 				'<div class="cmBody collapsable">' +
 					'<div class="textContent collapsableText">' + commentText + '</div>' +
 					'<button class="cmCollapser collapser" more-text="Show More" less-text="Show Less"></button>' +
