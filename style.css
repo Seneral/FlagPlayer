@@ -53,7 +53,7 @@ body {
 /* -------------------------------------------------------------------- */
 
 .header {
-	z-index: 5;
+	z-index: 6;
 	position: fixed;
 	top: 0;
 	width: 100%;
@@ -96,16 +96,10 @@ body {
 .headerIcon svg {
 	height: 100%;
 }
-.siteLogo svg{
+.flagPlayerLogo svg{
 	fill: var(--acc-color);
 	overflow: visible;
 }
-.darkIcon { display: none; }
-.theme-dark .darkIcon { display: initial; }
-.theme-dark .lightIcon { display: none; }
-.lightIcon { display: initial; }
-.icon { fill: var(--icon-color); }
-
 
 /* --------------------------- */
 /* ---- SEARCHBAR ------------ */
@@ -139,13 +133,13 @@ body {
 /* ---- PAGE LAYOUT --------------------------------------------------- */
 /* -------------------------------------------------------------------- */
 
-.container {
+.pageContainer {
 	padding-top: 3.5em;
 	/* Scrolling container instead of body gives performance problems */
 	/*overflow-y: auto;
 	height: inherit;*/
 }
-.content {
+.pageContent {
 	padding-bottom: 20em;
 }
 .section {
@@ -218,23 +212,16 @@ body {
 	width: 30em; 
 	max-width: 100%;
 }
-.desktop .section.player {
-}
-.desktop .section.banner {
-}
-.desktop .section.channel {
-}
-.desktop .section.search {
-}
+.desktop .section.player {}
+.desktop .section.banner {}
+.desktop .section.channel {}
+.desktop .section.search {}
 .desktop .section.playlist {
 	margin-bottom: 1em;
 }
-.desktop .section.video {
-}
-.desktop .section.related {
-}
-.desktop .section.comments { 
-}
+.desktop .section.video {}
+.desktop .section.related {}
+.desktop .section.comments {}
 .desktop .fullscreenPanel {
 	padding: 2em 6em;
 }
@@ -259,15 +246,15 @@ body {
 
 /* Pin Video */
 /* Performance probles because container needs to be scrolled instead of body
-.pinVideo .container {
+.pinVideo .pageContainer {
 	display: flex;
 	flex-direction: column;
 	overflow: hidden;
 }
-.pinVideo .content {
+.pinVideo .pageContent {
 	overflow-y: auto; 
 }
-.pinVideo .content::-webkit-scrollbar { 
+.pinVideo .pageContent::-webkit-scrollbar { 
 	width: 0px; 
 }
 .pinVideo .section.player { 
@@ -385,10 +372,10 @@ body {
 	animation: loader_rotate 2s linear infinite;
 	transform-origin: center center;
 }
-#bufferingIndicator>use[href="#svg_bufferingCircle"] {
+#bufferingIndicator > use {
 	animation: loader_dash 1.5s ease-in-out infinite;
 }
-#nextLoadIndicator>use[href="#svg_loadCircle"] {
+#nextLoadIndicator > use {
 	animation: loader_fill 8s linear;
 }
 
@@ -435,7 +422,14 @@ body {
 	width: 3.15em;
 	height: 2.75em;
 }
-.controlButton svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; fill: #fff; }
+.controlButton svg { 
+	position: absolute; 
+	top: 0; 
+	left: 0; 
+	width: 100%; 
+	height: 100%; 
+	fill: #fff; 
+}
 .controlButton:hover svg { fill: #ccc; transition: fill .1s; }
 .controlButton:active svg { fill: #999; }
 /* Interactive svg icons */
@@ -453,8 +447,7 @@ body {
 	transition: width 0.2s;
 }
 .controlButton:hover + .controlExpander, .controlExpander:hover, .controlExpander[interacting] {
-	width: 5em;
-	transition: width 0.2s;
+	width: 5em;+
 }
 .slider.controlSlider {
 	height: 100%;
@@ -523,13 +516,9 @@ body {
 	bottom: 2.5px;
 	top: -2.5px;
 	height: 5px;
-	transition: bottom .1s;
-	transition: top .1s;
-	transition: height .1s;
 }
 .timeline:hover .timelineKnob, .timeline[interacting] .timelineKnob {
 	opacity: 1;
-	transition: opacity .1s;
 }
 
 
@@ -552,10 +541,6 @@ body {
 }
 .optionsPanel > div {
 	margin: 0.4em 0;
-}
-.rightControl {
-	margin-left: 1em;
-	float: right;
 }
 
 /*endregion*/
@@ -617,27 +602,27 @@ body {
 	display: none;
 }
 /* Playlist Head Content */
-.plHeadMain .plDesc {
+.plDesc {
 	flex-grow: 0;
 	flex-shrink: 0;
 	padding: 0.5em 1em;
 }
-.plDesc .plTitle {
+.plTitle {
 	display: block;
 	font-size: 120%;
 }
-.plDesc .plDetail {
+.plDetail {
 	display: block;
 	font-size: 110%;
 }
-.plHeadMain .plCollapser {
+.plCollapser {
 	flex-grow: 0;
 	flex-shrink: 0;
 	min-width: 4em;
 	height: 100%;
 	padding: 1em;
 }
-.plHeadMain .plCollapser svg {
+.plCollapser svg {
 	height: 100%;
 }
 /* Playlist Video Container */
@@ -646,18 +631,18 @@ body {
 	width: 100%;
 	max-height: 50vh;
 }
-.playlistContainer .liPlaceholder {
+.playlist .liPlaceholder {
 	height: 54px;
 	margin: 0.5em 0;
 }
-.playlistContainer .liElement {
+.playlist .liElement {
 	height: 54px;
 }
-.playlistContainer .liThumbnail {
+.playlist .liThumbnail {
 	width: 96px;
 	height: 54px;
 }
-.playlistContainer .liIndex {
+.playlist .liIndex {
 	line-height: 54px;
 }
 
@@ -666,17 +651,14 @@ body {
 /* ---- VIDEO DETAIL --------- */
 /* --------------------------- */
 
-.section.video {
-
-}
+.section.video {}
 .vdDetail {
 	border-bottom: 1px solid var(--bg-acc-color);
 	position: relative;
 	padding: 0 0 1em;
 	margin-bottom: 1em;
 }
-.vdDetail.primary {
-}
+.vdDetail.primary {}
 .vdTitle {
 	display: block;
 	margin-bottom: 0.5em;
@@ -709,42 +691,32 @@ body {
 	width: 0%;
 	background-color: var(--acc-sec-color);
 }
-.vdDetail.secondary {
-}
+.vdDetail.secondary {}
 .vdUploadContainer {
-	position: relative;
 	display: flex;
 	flex-direction: row;
 	align-items:center;
 	margin-right: auto;
 }
-a.vdChannelLink {
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 100%;
-	height: 100%;
-	cursor: pointer;
+.vdUploadProfile {
+	position: relative;
 }
-img.vdUploadImg {
+.vdUploadImg {
 	height: 64px;
 	width: 64px;
-}
-img.profileImg {
-	border-radius: 50%;
 }
 .vdUploadDetail {
 	margin-left: 1em;
 }
-span.vdUploadName {
+.vdUploadName {
 	display: block;
 	font-weight: bolder;
 }
-span.vdUploadDate {
+.vdUploadDate {
 	display: block;
 	color: var(--txt-sec-color);
 }
-button.vdUploadSubscribers {
+.vdUploadSubscribers {
 	margin: 0.2em 0.5em;
 	padding: 0.5em 1em;
 	font-size: 110%;
@@ -784,9 +756,7 @@ button.vdUploadSubscribers {
 /* ---- COMMENTS ------------- */
 /* --------------------------- */
 
-.section.comments {
-
-}
+.section.comments {}
 .vdCommentList {}
 .cmContainer {
 	position: relative;
@@ -801,10 +771,12 @@ button.vdUploadSubscribers {
 	margin: 0.5em 0 1em;
 }
 .cmProfileColumn {
+	position: relative;
 	flex-shrink: 0;
 	flex-grow: 0;
 }
 .cmContentColumn {
+	flex-grow: 1;
 	margin-left: 1em;
 }
 .cmContainer .cmProfileImg {
@@ -845,16 +817,14 @@ button.vdUploadSubscribers {
 /* ---- RELATED VIDEOS ------- */
 /* --------------------------- */
 /* Standard Videolist */
-.section.related {
-}
+.section.related {}
 
 
 /* --------------------------- */
 /* ---- SEARCH --------------- */
 /* --------------------------- */
 /* Standard Videolist */
-.section.search {
-}
+.section.search {}
 .scActionBar {
 	margin-bottom: 1em;
 	border-bottom: 1px solid var(--bg-acc-color);
@@ -911,6 +881,7 @@ button.vdUploadSubscribers {
 .chLink:active img { fill: #888; }
 .chLink:active span { color: #bbb; }
 
+.section.channel {}
 .chDetail {
 	border-bottom: 1px solid var(--bg-acc-color);
 	position: relative;
@@ -927,20 +898,20 @@ button.vdUploadSubscribers {
 .chIdentity {
 	margin-left: 1em;
 }
-span.chName {
+.chName {
 	display: block;
 	word-break: break-word;
 	font-size: 120%;
 	font-weight: bolder;
 }
-span.chSubscribers {
+.chSubscribers {
 	display: block;
 	margin: 0;
 	font-size: 110%;
 	color: var(--txt-sec-color);
 	word-break: break-word;
 }
-img.chProfileImg {
+.chProfileImg {
 	height: 64px;
 	width: 64px;
 }
@@ -976,7 +947,7 @@ img.chProfileImg {
 /*region*/
 
 .fullscreenPanel {
-	z-index: 15;
+	z-index: 8;
 	position: fixed;
 	top: 0;
 	bottom: 0;
@@ -1066,6 +1037,30 @@ button {
 	filter: blur(4px);
 	-webkit-filter: blur(4px);
 }
+.profileImg {
+	border-radius: 50%;
+}
+.overlayLink {
+	z-index: 2;
+	position: absolute;
+	top: 0;
+	left: 0;
+	width: 100%;
+	height: 100%;
+}
+.detailLink {
+	z-index: 3;
+}
+.darkIcon { display: none; }
+.theme-dark .darkIcon { display: initial; }
+.theme-dark .lightIcon { display: none; }
+.lightIcon { display: initial; }
+.icon { fill: var(--icon-color); }
+.rightControl {
+	margin-left: 1em;
+	float: right;
+}
+
 
 
 /* --------------------------- */
@@ -1175,18 +1170,10 @@ button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 /* --------------------------- */
 
 .liElement {
-	display: flex;
 	position: relative;
+	display: flex;
 	width: 100%;
 	margin: 0.5em 0;
-}
-.liLink {
-	position: absolute;
-	top: 0;
-	left: 0;
-	width: 100%;
-	height: 100%;
-	cursor: pointer;
 }
 .liIndex {
 	text-align: center;
@@ -1294,7 +1281,7 @@ button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 .contextAction {
 	display: block;
 	position: absolute !important;
-	z-index: 2;
+	z-index: 4;
 	top: 0.5em;
 	right: 0.5em;
 	height: 2em;
@@ -1421,7 +1408,7 @@ button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 .dropdown .dropdownContent {
 	display: none;
 	position: absolute;
-	z-index: 4;
+	z-index: 5;
 	min-width: 10em;
 	width: 15em;
 	width: max-content; /* if available, nice, if not, whatever */
