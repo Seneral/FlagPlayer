@@ -42,27 +42,35 @@ A simple YouTube Web-App focussed on music playback
 - Most video titles are translated... (there's hope though)
 
 ## How To Use
-Hosts:  
-- No hosts so far
-Local Project:  
+
+#### Hosts:  
+- No hosts so far  
+
+#### Local Project:  
+
 1. Download the project
 2. Load up /page/index.html
-3. Search for videos or enter a playlist id in the search bar
-Advanced Server for comments:  
+3. Search for videos or enter a playlist id in the search bar  
+
+#### Advanced Server for comments:  
+
 1. On Windows: Execute /server/CorsServer.bat
 2. On Linux: Execute /server/CorsServer.sh
 3. Note your local server adress as displayed in the console, usually http://localhost:8080
 4. Open the settings in the webpage (gear open right)
 5. Enter local server adress into the Cors Server field
-6. Reload page and enjoy comments
+6. Reload page and enjoy comments  
+
 Note: You need to start it every time OR set it up as a service  
 You can also copy the .bat/.sh and put it on your desktop - just edit it to point to the yt-server.js file  
 
 ## Server Requirements
 As any website scraping other website's content, a reverse-proxy needs to be set up so that the CORS policy doesn't block the request. There are a few freely available servers out there, but for actual usage you should NEVER rely on them:  
+
 1. They're usually slow and not very reliable
 2. They provide the service for testing purposes, NOT constant usage - you might get blocked
-3. Custom local server allows you to see comments
+3. Custom local server allows you to see comments  
+
 So follow the Instructions above to set up a local server.  
 This is a modified CORS Anywhere server that differs in that it passes certain cookies and modifies the header to look like genuine same-origin requests. DO NOT host this server publicly, there are no safeguards activated to prevent abuse of your network.
 
