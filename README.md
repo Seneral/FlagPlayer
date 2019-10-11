@@ -17,12 +17,12 @@ A simple YouTube Web-App focussed on music playback
 - Channel page including all tabs
 
 ## Missing standard features
+- Home Page
 - Subscriptions / Feeds
 - Subtitles
 - Download Button
 - Proper synchronized DASH playback with MediaSourceExtension
 - Playlist/Channel search
-- Better mobile and touch support (not tested)
 
 ## Future aspirations
 - Separate Database Management Site: 
@@ -78,6 +78,8 @@ This is a modified CORS Anywhere server that differs in that it passes certain c
 - YouTube is terribly bloated and loads embarassingly slow
 - YouTube has several bugs hindering effective playback
 - YouTube forces streaming of video - even if you only use audio
+- YouTube doesn't allow background music playback on mobile
+- Music Playback pf mixed content (local + YouTube) is difficult
 - I wanted a cross-platform music player to do experiments on
 - I wanted to do a more complex webpage
 - YouTube is terribly bloa- ah.
