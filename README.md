@@ -44,7 +44,7 @@ A simple YouTube Web-App focussed on music playback
 ## How To Use
 
 #### Hosts:  
-- No hosts so far  
+- Official Host (No CORS Backend): https://flagplayer.seneral.dev  
 
 #### Local Project:  
 
@@ -57,7 +57,7 @@ A simple YouTube Web-App focussed on music playback
 1. On Windows: Execute /server/CorsServer.bat
 2. On Linux: Execute /server/CorsServer.sh
 3. Note your local server adress as displayed in the console, usually http://localhost:8080
-4. Open the settings in the webpage (gear open right)
+4. Open the settings in FlagPlayer (gear top right)
 5. Enter local server adress into the Cors Server field
 6. Reload page and enjoy comments  
 
