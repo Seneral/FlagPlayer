@@ -29,15 +29,14 @@ A simple YouTube Web-App focussed on music playback
 	- Multi-dimensional graphs showing correlation between videos (based on metadata or even media analysis)
 	- Advanced playback filtering based on tags and corresponding weights (e.g. favour a specific genre)
 	- Set operations on playlists (e.g. all music minus my favourites and music older than 5 months)
-- Playlists including local media (or replace streams with higher quality local media)
+- Playlists including local media (or replace youtube streams with higher quality local media)
 - Experiments to extract metadata (like lyrics) from description and/or comments or from wikis/databases
 - Next-up queue overriding current playlist
 - Related videos browser - dive into related videos of related videos (could work great with next-up queue) 
 
 ## Known Issues
-- Video Playback, especially high resolutions, are super laggy and quickly go out of sync. Proper MSE implemenentation is needed
+- Video Playback, especially high resolutions, are super laggy and quickly go out of sync. Proper MSE implemenentation is needed AND local CORS server, since MSE would force all streams to be routed through a CORS server
 - Wrong aspect of thumbnails for videos with 1. only low resolution thumbnail AND 2. non 16-9 ratio - pretty rare
-- Can't open internal links in new tabs (will have to revert back to more standard navigation)
 - Current video title is original (not translated), while related videos, etc. are all translated
 - Most video titles are translated... (there's hope though)
 
