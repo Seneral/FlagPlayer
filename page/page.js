@@ -1093,8 +1093,9 @@ function yt_parseNum (numText) {
 	var num = parseInt(numMatch[1].replace(/[.,]/g,''));
 	if (isNaN(num)) return 0;
 	if (numMatch[2]) {
-		var split = numMatch[1].match(/([0-9,.]+)[.,]([0-9]+)/);
-		num = parseInt(split[1].replace(/[.,]/g,'')) + parseFloat("0." + split[2]);
+		var split = numMatch[1].match(/([0-9]+)(?:[.,]([0-9]+))?/);
+		if (split[2])
+			num = parseInt(split[1].replace(/[.,]/g,'')) + parseFloat("0." + split[2]);
 		if (numMatch[2] == "K") return num * 1000;
 		if (numMatch[2] == "M") return num * 1000000;
 		if (numMatch[2] == "B") return num * 1000000000;
@@ -2612,7 +2613,7 @@ function ui_addToPlaylist (startIndex) {
 	var focusIndex = undefined;
 	for(var i = startIndex; i < yt_playlist.videos.length; i++) {
 		var video = yt_playlist.videos[i];
-		videoContainer.appendChild (ht_getVideoPlaceholder(video.title, video.uploader.name));
+		videoContainer.appendChild (ht_getVideoPlaceholder(video.videoID, video.title, video.uploader.name));
 		if (video.videoID == yt_videoID) focusIndex = i;
 	}
 	sec_playlist.style.display = "block";
@@ -2620,7 +2621,7 @@ function ui_addToPlaylist (startIndex) {
 		videoContainer.scrollTop = Math.max(0, videoContainer.scrollHeight * focusIndex / videoContainer.childElementCount - 40);
 	}
 	videoContainer.onscroll = ui_checkPlaylist;
-	I("playlist").oncollapse = function () { // Triggered by collapser
+	I("playlist").onCollapse = function () { // Triggered by collapser
 		ui_setPlaylistPosition();
 		ui_checkPlaylist();
 	}
@@ -2641,15 +2642,10 @@ function ui_setPlaylistPosition() {
 function ui_checkPlaylist () {
 	var container = I("plVideos");
 	ui_adaptiveListLoad(container, yt_playlist.videos.length, function (index) {
-		var videoPlaceholder = container.children[index];
 		var video = yt_playlist.videos[index];
-		var videoElement = ht_appendVideoElement(container, index+1, video.videoID, ui_formatTimeText(video.length), video.title, video.uploader.name, undefined);
-		container.replaceChild(videoElement, videoPlaceholder);
+		ht_fillVideoPlaceholder(container.children[index], index+1, video.videoID, ui_formatTimeText(video.length));
 	}, function (index) {
-		var video = yt_playlist.videos[index];
-		var videoElement = container.children[index];
-		var videoPlaceholder = ht_getVideoPlaceholder(video.title, video.uploader.name);
-		container.replaceChild(videoPlaceholder, videoElement);
+		ht_clearVideoPlaceholder(container.children[index]);
 	});
 }
 
@@ -2785,33 +2781,34 @@ function ui_fillCategoryFilter (categories) {
 /* -------------------- */
 
 function ui_adaptiveListLoad (container, count, load, unload) {
-	var prevTop = parseInt (container.getAttribute ("top-loaded"));
-	var prevBot = parseInt (container.getAttribute ("bottom-loaded"));
-	if (container.scrollHeight <= 0) {
-		for (var i = prevTop; i <= prevBot; i++) unload(i);
-		container.setAttribute("top-loaded", NaN);
-		container.setAttribute("bottom-loaded", NaN);
-		return;	
+	if (container.scrollHeight <= 0) return; // collapsed
+	// Previously Loaded
+	var prevTop = parseInt(container.getAttribute ("top-loaded"));
+	var prevBot = parseInt(container.getAttribute ("bottom-loaded"));
+	if (isNaN(prevTop)) prevTop = count;
+	if (isNaN(prevBot)) prevBot = -1;
+	// New Loaded
+	var topLd, botLd;
+	if (count < 40) { // Load All
+		topLd = 0;
+		botLd = count-1;
+	} else { // Load visible + margin
+		const margin = 4;
+		var topEl = Math.floor((container.scrollTop/container.scrollHeight) * count);
+		var botEl = Math.ceil(((container.scrollTop+container.clientHeight)/container.scrollHeight) * count);
+		topLd = Math.max (0, topEl-margin);
+		botLd = Math.min (count-1, botEl + margin);
 	}
-	var topEl = Math.floor((container.scrollTop/container.scrollHeight) * count);
-	var botEl = Math.ceil(((container.scrollTop+container.clientHeight)/container.scrollHeight) * count);
-	var topLd = topEl, botLd = botEl, topUnld = 0, botUnld = -1;
-	if (count < 40 && (isNaN (prevTop) && isNaN(prevBot))) { // Load All
-		for (var i = 0; i < count; i++) load(i);
-		container.setAttribute("top-loaded", 0);
-		container.setAttribute("bottom-loaded", count-1);
-		return;
-	} 
-	if (!isNaN (prevTop) && !isNaN(prevBot)) { // doesn't work when container height shrinks (will unload all)
-		var topLd = topEl >= prevTop && topEl <= prevBot? prevBot+1 : topEl;
-		var botLd = botEl >= prevTop && botEl <= prevBot? prevTop-1 : botEl;
-		var topUnld = prevTop >= topEl && prevTop <= botEl? botEl+1 : prevTop;
-		var botUnld = prevBot >= topEl && prevBot <= botEl? topEl-1 : prevBot;
+	// Apply
+	if (prevTop == topLd && prevBot == botLd) return;
+	for (var i = topLd; i <= botLd && i < count; i++) {
+		if (prevTop > i || prevBot < i) load(i);
 	}
-	for (var i = topLd; i <= botLd && i < count; i++) load(i);
-	for (var i = topUnld; i <= botUnld && i < count; i++) unload(i);
-	container.setAttribute("top-loaded", topEl);
-	container.setAttribute("bottom-loaded", botEl);
+	for (var i = prevTop; i <= prevBot && i < count; i++) {
+		if (topLd > i || botLd < i) unload(i);
+	}
+	container.setAttribute("top-loaded", topLd);
+	container.setAttribute("bottom-loaded", botLd);
 }
 function ui_updateSlider (mouse) {
 	if (ui_dragSlider) {
@@ -3277,6 +3274,7 @@ function onMouseClick (mouse) {
 		var collapsable = ui_hasCascadedClass(target, "collapsable", 4);
 		var text = collapsable.toggleAttr("collapsed")? "more-text" : "less-text";
 		if (target.hasAttribute(text)) target.innerText = target.getAttribute(text);
+		if (collapsable.onCollapse) collapsable.onCollapse();
 	}
 
 	// Handle Content Loader
@@ -3845,16 +3843,39 @@ function ex_interpretMetadata() {
 /* ---- HTML BIN ------ */
 /* -------------------- */
 
-function ht_getVideoPlaceholder () {
-	var element = document.createElement("div");
-	element.classList.add("liPlaceholder");
-	element.innerText = [].join.call(arguments, " "); // For in-page search
+function ht_getVideoPlaceholder (id, prim, sec) {
+	container.insertAdjacentHTML ("beforeEnd",
+		'<div class="liElement" videoID="' + id + '">' + 
+			'<div class="liDetail selectable">' + 
+				'<span class="twoline liPrimary">' + prim + '</span>' +
+				'<span class="oneline liSecondary">' + sec + '</span>' +
+			'</div>' + 
+		'</div>');
+	return container.lastElementChild;
+}
+function ht_fillVideoPlaceholder (element, index, id, length) {
+	element.insertAdjacentHTML ("afterBegin",
+		'<a class="overlayLink" navigation="v=' + id + '" href="' + ct_getNavLink("v=" + id) + '"></a>' + 
+		'<div class="liIndex">' + index + '</div>' + 
+		'<div class="liThumbnail">' + 
+			'<img class="liThumbnailImg" src="' + HOST_YT_IMG +  id + '/default.jpg">' +
+			'<span class="liThumbnailInfo"> ' +  length + ' </span>' +
+		'</div>');
+	return element;
+}
+function ht_clearVideoPlaceholder (element) {
+	if (element.firstElementChild.className == "overlayLink")
+		element.removeChild(element.firstElementChild);
+	if (element.firstElementChild.className == "liIndex")
+		element.removeChild(element.firstElementChild);
+	if (element.firstElementChild.className == "liThumbnail")
+		element.removeChild(element.firstElementChild);
 	return element;
 }
 function ht_appendVideoElement (container, index, id, length, prim, sec, tert) {
 	container.insertAdjacentHTML ("beforeEnd",
 		'<div class="liElement" videoID="' + id + '">' + 
-			'<a class="overlayLink" navigation="v=' + id + '" href="' + ct_getNavLink("v" + id) + '"></a>' + 
+			'<a class="overlayLink" navigation="v=' + id + '" href="' + ct_getNavLink("v=" + id) + '"></a>' + 
 (index == undefined?	'' :
 			'<div class="liIndex">' + index + '</div>') + 
 			'<div class="liThumbnail">' + 
@@ -3873,7 +3894,7 @@ function ht_appendVideoElement (container, index, id, length, prim, sec, tert) {
 function ht_appendPlaylistElement (container, id, thumbID, prim, sec, tert) {
 	container.insertAdjacentHTML ("beforeEnd",
 		'<div class="liElement">' + 
-			'<a class="overlayLink" navigation="list=' + id + '" href="' + ct_getNavLink("list" + id) + '"></a>' + 
+			'<a class="overlayLink" navigation="list=' + id + '" href="' + ct_getNavLink("list=" + id) + '"></a>' + 
 			'<div class="liThumbnail">' + 
 				'<img class="liThumbnailImg" src="' + HOST_YT_IMG +  thumbID + '/default.jpg">' +
 			'</div>' + 
