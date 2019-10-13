@@ -961,6 +961,7 @@ body {
 	width: 100%;
 	max-width: 30em;
 	height: 100%;
+	max-height: 40em;
 	display: flex;
 	flex-direction: column;
 	background: var(--bg-color);
