@@ -2178,8 +2178,13 @@ function ui_indicatePlay () {
 	ui_timerIndicator = setTimeout(() => I("playIndicator").removeAttribute("trigger"), 500);
 }
 function ui_setPoster () {
-	I("videoPoster").data = !yt_videoID? "" : (HOST_YT_IMG + yt_videoID + "/maxresdefault.jpg");
-	I("videoPosterFallback").data = !yt_videoID? "" : (HOST_YT_IMG + yt_videoID + "/hqdefault.jpg");
+	// Recreate to reset object fallback
+	var oldVideoPoster = I("videoPoster");
+	var newVideoPoster = oldVideoPoster.cloneNode(true);
+	oldVideoPoster.parentElement.insertBefore (newVideoPoster, oldVideoPoster.nextSibling);
+	oldVideoPoster.parentElement.removeChild (oldVideoPoster);
+	I("videoPoster").data = !yt_videoID? "" : (HOST_YT_IMG + yt_videoID + "/maxresdefault.jpg");;
+	I("videoPosterFallback").data = !yt_videoID? "" : (HOST_YT_IMG + yt_videoID + "/hqdefault.jpg");;
 }
 
 function ui_setupMediaSession () {
