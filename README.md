@@ -5,6 +5,7 @@ A simple YouTube Web-App focussed on music playback
 - Free, easy to modify and all important stuff happens client-side
 - No official YouTube API used
 - No third party code used
+- Only 110kb - much smaller than YouTube and even Invidious. With care and compression, only 30kb download
 - Standard player features (select streams freely, e.g. audio only)
 - Prooven interface including dark and light theme
 - Basic settings
