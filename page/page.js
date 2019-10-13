@@ -188,7 +188,6 @@ var ct_isAdvancedCorsHost; // Boolean: Supports cookie-passing for (with others)
 var ct_traversedHistory; // Prevent messing with history when traversing
 var ct_timerAutoplay; // Timer ID for video end autoplay timer
 var ui_controlBarCnt; // For control bar retraction when mouse is unmoving
-var ui_controlBarShown; // Boolean whether control bar just got brought up due to click (max 50ms ago)
 var ui_timerIndicator; // Timer ID for the current temporary indicator (pause/plax) on the video screen
 var ui_dragSlider; // Currently dragging a slider?
 var ui_dragSliderElement; // Currently dragged slider element 
@@ -516,11 +515,11 @@ function ct_getVideoPlIndex () { // Return -1 on fail so that pos+1 will be 0
 
 function ct_navSearch(searchTerms) {
 	var plMatch = searchTerms.match(/(PL[a-zA-Z0-9_-]{32})/);
-	var vdMatch = searchTerms.match(/(v=[a-zA-Z0-9_-]{11})/);
-	if (plMatch) ct_loadPlaylist(plMatch[0]);
-	else {
+	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/);
+	if (plMatch) ct_loadPlaylist(plMatch[1]);
+	if (!plMatch || vdMatch) {
 		ct_beforeNav();
-		if (vdMatch) yt_videoID = vdMatch[0];
+		if (vdMatch) yt_videoID = vdMatch[1];
 		else yt_searchTerms = searchTerms;
 		ct_performNav();
 	}
@@ -941,7 +940,7 @@ function yt_browse (subPath, callback, peek) {
 		} catch (e) { console.error("Failed to get config params!", e); }
 
 		// Whether YouTube thinks this is mobile - independant from ct_isDesktop, which is this apps opinion
-		page.isDesktop = Object.keys(page.initialData.contents).some(function (s) { return s.startsWith("twoColumn"); });
+		page.isDesktop = !page.initialData || Object.keys(page.initialData.contents).some(function (s) { return s.startsWith("twoColumn"); });
 
 		// Extract youtube secrets
 		page.secrets = {};
@@ -1091,13 +1090,14 @@ function yt_parseNum (numText) {
 	if (Number.isInteger (numText)) return numText;
 	numMatch = numText.match(/[^0-9]*([0-9,.]+)\s?([KMB]?).*/); // (5.2)(K), (5263)(), (5,263)() etc.
 	if (!numMatch) return 0;
-	var num = parseInt(numMatch[1].replace(/[^0-9]/g,''));
+	var num = parseInt(numMatch[1].replace(/[.,]/g,''));
 	if (isNaN(num)) return 0;
 	if (numMatch[2]) {
-		var post = numMatch[1].match(/[.,]/) != undefined;
-		if (numMatch[2] == "K") return num * (post? 100 : 1000);
-		if (numMatch[2] == "M") return num * (post? 100000 : 1000000);
-		if (numMatch[2] == "B") return num * (post? 100000000 : 1000000000);
+		var split = numMatch[1].match(/([0-9,.]+)[.,]([0-9]+)/);
+		num = parseInt(split[1].replace(/[.,]/g,'')) + parseFloat("0." + split[2]);
+		if (numMatch[2] == "K") return num * 1000;
+		if (numMatch[2] == "M") return num * 1000000;
+		if (numMatch[2] == "B") return num * 1000000000;
 	}
 	return num;
 }
@@ -2365,7 +2365,7 @@ function ui_setVideoMetadata() {
 	});
 	I("vdUploaderImg").src = yt_video.meta.uploader.profileImg;
 	I("vdUploaderName").innerText = yt_video.meta.uploader.name;
-	I("vdUploaderSubscribers").innerText = "SUBSCRIBE " + yt_video.meta.uploader.subscribers;
+	I("vdUploaderSubscribers").innerText = "SUBSCRIBE " + (ct_isDesktop? ui_formatNumber(yt_video.meta.uploader.subscribers) : ui_shortenNumber(yt_video.meta.uploader.subscribers));
 	I("vdUploadDate").innerText = "Uploaded on " + ui_formatDate(yt_video.meta.uploadedDate);
 	I("vdDescription").innerHTML = ui_formatDescription(yt_video.meta.description);
 
@@ -2443,13 +2443,13 @@ function ui_resetRelatedVideos () {
 /* -------------------- */
 
 function ui_addComments (container, comments, startIndex, finished) {
-	I("vdCommentLabel").innerText = yt_video.commentData.count + " comments";
+	I("vdCommentLabel").innerText = ui_formatNumber (yt_video.commentData.count) + " comments";
 	if (!startIndex) startIndex = 0;
 	for(var i = startIndex; i < comments.length; i++) {
 		var comm = comments[i];
 		ht_appendCommentElement(container, comm.id, comm.author.userID? ("u=" + comm.author.userID) : ("c=" + comm.author.channelID), 
 			comm.author.profileImg, comm.author.name, comm.publishedTimeAgoText, ui_formatDescription(comm.text), 
-			comm.likes, comm.replyData? comm.replyData.count : undefined);
+			ui_formatNumber(comm.likes), comm.replyData? comm.replyData.count : undefined);
 	}
 	ui_setupDropdowns();
 	var loader = Array.from(container.children).find(c => c.className.includes("contentLoader"));
@@ -2952,7 +2952,6 @@ function ui_updateControlBar (mouse) { // MouseEvent + 100ms Interval
 			if (ui_isMouseIn(mouse, sec_player)) {
 				if (mouse.type != "mousemove" || mouse.movementX * mouse.movementX + mouse.movementY * mouse.movementY > 0.1) {
 					ui_showControlBar();
-					ui_controlBarShown = true;
 				}
 			} else ui_hideControlBar();
 		} else { // Interval - Hide when mouse unmoved
