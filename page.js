@@ -202,7 +202,7 @@ const LANG_CONTENT = "en;q=0.9"; // content language (auto-translate) - * should
 const HOST_YT = "https://www.youtube.com";
 const HOST_YT_MOBILE = "https://m.youtube.com";
 const HOST_YT_IMG = "https://i.ytimg.com/vi/"; // https://i.ytimg.com/vi/ or https://img.youtube.com/vi/
-const HOST_CORS = "https://cors-anywhere.herokuapp.com/"; // Default value only
+const HOST_CORS = "https://flagplayer-cors.herokuapp.com/"; // Default value only
 //"http://localhost:8080/";
 //"https://cors-anywhere.herokuapp.com/"; 
 //"http://allow-any-origin.appspot.com/";
@@ -1409,7 +1409,8 @@ function yt_extractChannelPageTabs (initialData) {
 			}
 			tab.videos = yt_parseChannelPageVideos(c.gridRenderer.items);
 		}
-		if (tab.title.toLowerCase().includes("more")) tab.title = "More";
+		if (tab.title.toLowerCase().includes("more")) tab.title = "More"; // More from this artist
+		if (tab.title.toLowerCase().includes("streams")) tab.title = "Streams"; // Past live streams
 		tab.id = tab.title.toLowerCase().replace(/\s/g, "-");
 		tabs.push(tab);
 	};
@@ -1768,6 +1769,10 @@ function yt_extractVideoCommentData () {
 		} else {
 			yt_video.commentData.deactivated = true;
 		}
+		if (commentData.header) { // Mobile only
+			yt_video.commentData.count = yt_parseNum(commentData.header.commentSectionHeaderRenderer.countText.runs[1].text);
+			yt_video.commentData.sorted = "TOP"; // No way to select sorting on mobile website (only on app)
+		}
 	} catch (e) { console.error("Failed to extract comment data!", e, yt_page.initialData); }
 	
 	yt_video.commentData.comments = [];
@@ -1802,14 +1807,14 @@ function yt_loadMoreComments (pagedContent) {
 		return;
 	
 	var isReplyRequest = pagedContent.data.replies != undefined;
-	var requestURL = HOST_YT + "/comment_service_ajax?" + 
+	var requestURL = (ct_page.isDesktop? HOST_YT + "/comment_service_ajax?" : HOST_YT_MOBILE + "/watch_comment?") + 
 		(isReplyRequest? "action_get_comment_replies" : "action_get_comments") + "=1&pbj=1" + 
-		"&ctoken=" + pagedContent.data.conToken + (pagedContent.data.conToken.length < 3000? "&continuation=" + pagedContent.data.conToken : "") +  "&itct=" + yt_video.commentData.itctToken; 
+		"&ctoken=" + pagedContent.data.conToken + (pagedContent.data.conToken.length < 3000 && ct_page.isDesktop? "&continuation=" + pagedContent.data.conToken : "") +  "&itct=" + yt_video.commentData.itctToken; 
 	PAGED_REQUEST(pagedContent, "POST", requestURL, true, function(commentData) {
 		// Parsing
 		try { yt_video.commentData.lastPage = JSON.parse(commentData); 
 		} catch (e) { console.error("Failed to get comment data!", e, { commentData: commentData }); return; }		
-		if (isReplyRequest) yt_video.commentData.lastPage = yt_video.commentData.lastPage[1];
+		if (isReplyRequest || !ct_page.isDesktop) yt_video.commentData.lastPage = yt_video.commentData.lastPage[1];
 		yt_updateNavigation(yt_video.commentData.lastPage);
 		
 		// Extract comments
@@ -1832,7 +1837,7 @@ function yt_extractVideoCommentObject (data, response) {
 	}
 	var isReplyRequest = data.comments == undefined;
 	var comments = data.comments || data.replies;
-	var contents = isReplyRequest? response.continuationContents.commentRepliesContinuation : response.continuationContents.itemSectionContinuation;
+	var contents = isReplyRequest? response.continuationContents.commentRepliesContinuation : response.continuationContents.itemSectionContinuation || response.continuationContents.commentSectionContinuation;
 	
 	if (contents.header) {
 		try { // Extract comment header
@@ -1845,9 +1850,9 @@ function yt_extractVideoCommentObject (data, response) {
 		} catch (e) { console.error("Failed to extract comment header!", e, yt_video.commentData); }
 	} // Only in first main request, never reply requests
 
-	if (contents.contents) {
+	if (contents.contents || contents.items) {
 		try { // Extract comments
-			contents.contents.forEach(function (c) {
+			(contents.contents || contents.items).forEach(function (c) {
 				var thread, comm;
 				if (c.commentThreadRenderer) {
 					thread = c.commentThreadRenderer;
@@ -1855,12 +1860,12 @@ function yt_extractVideoCommentObject (data, response) {
 				} else comm = c.commentRenderer;
 				var comment = {
 					id: comm.commentId,
-					text: comm.contentText.runs? yt_parseFormattedRuns(comm.contentText.runs) : "",
+					text: comm.contentText.runs? yt_parseFormattedRuns(comm.contentText.runs) : comm.contentText.simpleText,
 					likes: comm.likeCount,
-					publishedTimeAgoText: comm.publishedTimeText.runs[0].text,
+					publishedTimeAgoText: yt_parseLabel(comm.publishedTimeText),
 				};
 				comment.author = { // If no authorText, YT failed to get author internally (+ default thumbnail) - looking comment up by ID retrieves author correctly
-					name: comm.authorText? comm.authorText.simpleText : "[UNKNOWN AUTHOR]",
+					name: yt_parseLabel(comm.authorText) || "[UNKNOWN AUTHOR]",
 					channelID: comm.authorEndpoint.browseEndpoint.browseId,
 					url: comm.authorEndpoint.browseEndpoint.canonicalBaseUrl,
 					userID: comm.authorEndpoint.browseEndpoint.canonicalBaseUrl.startsWith("/user/")? comm.authorEndpoint.browseEndpoint.canonicalBaseUrl.substring(6) : undefined,
