@@ -1807,14 +1807,14 @@ function yt_loadMoreComments (pagedContent) {
 		return;
 	
 	var isReplyRequest = pagedContent.data.replies != undefined;
-	var requestURL = (ct_page.isDesktop? HOST_YT + "/comment_service_ajax?" : HOST_YT_MOBILE + "/watch_comment?") + 
+	var requestURL = (yt_page.isDesktop? HOST_YT + "/comment_service_ajax?" : HOST_YT_MOBILE + "/watch_comment?") + 
 		(isReplyRequest? "action_get_comment_replies" : "action_get_comments") + "=1&pbj=1" + 
-		"&ctoken=" + pagedContent.data.conToken + (pagedContent.data.conToken.length < 3000 && ct_page.isDesktop? "&continuation=" + pagedContent.data.conToken : "") +  "&itct=" + yt_video.commentData.itctToken; 
+		"&ctoken=" + pagedContent.data.conToken + (pagedContent.data.conToken.length < 3000 && yt_page.isDesktop? "&continuation=" + pagedContent.data.conToken : "") +  "&itct=" + yt_video.commentData.itctToken; 
 	PAGED_REQUEST(pagedContent, "POST", requestURL, true, function(commentData) {
 		// Parsing
 		try { yt_video.commentData.lastPage = JSON.parse(commentData); 
 		} catch (e) { console.error("Failed to get comment data!", e, { commentData: commentData }); return; }		
-		if (isReplyRequest || !ct_page.isDesktop) yt_video.commentData.lastPage = yt_video.commentData.lastPage[1];
+		if (isReplyRequest || !yt_page.isDesktop) yt_video.commentData.lastPage = yt_video.commentData.lastPage[1];
 		yt_updateNavigation(yt_video.commentData.lastPage);
 		
 		// Extract comments
