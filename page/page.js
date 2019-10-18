@@ -202,7 +202,7 @@ const LANG_CONTENT = "en;q=0.9"; // content language (auto-translate) - * should
 const HOST_YT = "https://www.youtube.com";
 const HOST_YT_MOBILE = "https://m.youtube.com";
 const HOST_YT_IMG = "https://i.ytimg.com/vi/"; // https://i.ytimg.com/vi/ or https://img.youtube.com/vi/
-const HOST_CORS = "https://cors-anywhere.herokuapp.com/"; // Default value only
+const HOST_CORS = "https://flagplayer-cors.herokuapp.com/"; // Default value only
 //"http://localhost:8080/";
 //"https://cors-anywhere.herokuapp.com/"; 
 //"http://allow-any-origin.appspot.com/";
