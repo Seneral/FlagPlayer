@@ -1,89 +1,186 @@
-# FlagPlayer
-A simple YouTube Web-App focussed on music playback
-(aka small project that my subconcious thought up to prevent myself from learning for pesky exams)
 
-- Free, easy to modify and all important stuff happens client-side
-- No official YouTube API used
-- No third party code used
-- Only 110kb - much smaller than YouTube and even Invidious. With care and compression, only 30kb download
-- Standard player features (select streams freely, e.g. audio only)
-- Prooven interface including dark and light theme
-- Basic settings
-- Save and cache playlists in local database 
-- Watch page including:
-	- Comments and Threads (only on custom local server)
-	- Related videos (excluding mixes and livestreams for now)
-	- Playlists large and small
-- Search (videos only) with filtering by category
-- Channel page including all tabs
+**CORS Anywhere** is a NodeJS proxy which adds CORS headers to the proxied request.
+**This is an unsafe, non-production-ready version of CORS Anywhere!**
+It allows for a lot more things that are considered unsafe like passing cookies (manually or from browser), emulating headers of browser request or fetches from the initial site, etc.
+Don't ever host this publicly without proper safety measures (refer to Cors Anywhere Docs), you can do bad stuff with this and the code has also not been written with public usage in mind.
+Start Server: ./CorsServer.sh (Unix) or double click CorsServer.bat (Windows)
+It is a standard NodeJS server (Node.js is a JavaScript runtime that allows execution of javascript locally)
+Rest of the readme is unmodified.
 
-## Missing standard features
-- Home Page
-- Subscriptions / Feeds
-- Subtitles
-- Download Button
-- Proper synchronized DASH playback with MediaSourceExtension
-- Playlist/Channel search
 
-## Future aspirations
-- Separate Database Management Site: 
-	- Multi-dimensional graphs showing correlation between videos (based on metadata or even media analysis)
-	- Advanced playback filtering based on tags and corresponding weights (e.g. favour a specific genre)
-	- Set operations on playlists (e.g. all music minus my favourites and music older than 5 months)
-- Playlists including local media (or replace youtube streams with higher quality local media)
-- Experiments to extract metadata (like lyrics) from description and/or comments or from wikis/databases
-- Next-up queue overriding current playlist
-- Related videos browser - dive into related videos of related videos (could work great with next-up queue) 
+The url to proxy is literally taken from the path, validated and proxied. The protocol
+part of the proxied URI is optional, and defaults to "http". If port 443 is specified,
+the protocol defaults to "https".
 
-## Known Issues
-- Video Playback, especially high resolutions, are super laggy and quickly go out of sync. Proper MSE implemenentation is needed AND local CORS server, since MSE would force all streams to be routed through a CORS server
-- Wrong aspect of thumbnails for videos with 1. only low resolution thumbnail AND 2. non 16-9 ratio - pretty rare
-- Current video title is original (not translated), while related videos, etc. are all translated
-- Most video titles are translated... (there's hope though)
+This package does not put any restrictions on the http methods or headers, except for
+cookies. Requesting [user credentials](http://www.w3.org/TR/cors/#user-credentials) is disallowed.
+The app can be configured to require a header for proxying a request, for example to avoid
+a direct visit from the browser.
 
-## How To Use
+## Example
 
-#### Hosts:  
-- Official Host (No CORS Backend): https://flagplayer.seneral.dev  
+```javascript
+// Listen on a specific host via the HOST environment variable
+var host = process.env.HOST || '0.0.0.0';
+// Listen on a specific port via the PORT environment variable
+var port = process.env.PORT || 8080;
 
-#### Local Project:  
+var cors_proxy = require('cors-anywhere');
+cors_proxy.createServer({
+    originWhitelist: [], // Allow all origins
+    requireHeader: ['origin', 'x-requested-with'],
+    removeHeaders: ['cookie', 'cookie2']
+}).listen(port, host, function() {
+    console.log('Running CORS Anywhere on ' + host + ':' + port);
+});
 
-1. Download the project
-2. Load up /page/index.html
-3. Search for videos or enter a playlist id in the search bar  
+```
+Request examples:
 
-#### Advanced Server for comments:  
+* `http://localhost:8080/http://google.com/` - Google.com with CORS headers
+* `http://localhost:8080/google.com` - Same as previous.
+* `http://localhost:8080/google.com:443` - Proxies `https://google.com/`
+* `http://localhost:8080/` - Shows usage text, as defined in `libs/help.txt`
+* `http://localhost:8080/favicon.ico` - Replies 404 Not found
 
-1. On Windows: Execute /server/CorsServer.bat
-2. On Linux: Execute /server/CorsServer.sh
-3. Note your local server adress as displayed in the console, usually http://localhost:8080
-4. Open the settings in FlagPlayer (gear top right)
-5. Enter local server adress into the Cors Server field
-6. Reload page and enjoy comments  
+Live examples:
 
-Note: You need to start it every time OR set it up as a service  
-You can also copy the .bat/.sh and put it on your desktop - just edit it to point to the yt-server.js file  
+* https://cors-anywhere.herokuapp.com/
+* https://robwu.nl/cors-anywhere.html - This demo shows how to use the API.
 
-## Server Requirements
-As any website scraping other website's content, a reverse-proxy needs to be set up so that the CORS policy doesn't block the request. There are a few freely available servers out there, but for actual usage you should NEVER rely on them:  
+## Documentation
 
-1. They're usually slow and not very reliable
-2. They provide the service for testing purposes, NOT constant usage - you might get blocked
-3. Custom local server allows you to see comments  
+### Client
 
-So follow the Instructions above to set up a local server.  
-This is a modified CORS Anywhere server that differs in that it passes certain cookies and modifies the header to look like genuine same-origin requests. DO NOT host this server publicly, there are no safeguards activated to prevent abuse of your network.
+To use the API, just prefix the URL with the API URL. Take a look at [demo.html](demo.html) for an example.
+A concise summary of the documentation is provided at [lib/help.txt](lib/help.txt).
 
-## Motivation
-- YouTube is terribly bloated and loads embarassingly slow
-- YouTube has several bugs hindering effective playback
-- YouTube forces streaming of video - even if you only use audio
-- YouTube doesn't allow background music playback on mobile
-- Music Playback pf mixed content (local + YouTube) is difficult
-- I wanted a cross-platform music player to do experiments on
-- I wanted to do a more complex webpage
-- YouTube is terribly bloa- ah.
+If you want to automatically enable cross-domain requests when needed, use the following snippet:
+
+```javascript
+(function() {
+    var cors_api_host = 'cors-anywhere.herokuapp.com';
+    var cors_api_url = 'https://' + cors_api_host + '/';
+    var slice = [].slice;
+    var origin = window.location.protocol + '//' + window.location.host;
+    var open = XMLHttpRequest.prototype.open;
+    XMLHttpRequest.prototype.open = function() {
+        var args = slice.call(arguments);
+        var targetOrigin = /^https?:\/\/([^\/]+)/i.exec(args[1]);
+        if (targetOrigin && targetOrigin[0].toLowerCase() !== origin &&
+            targetOrigin[1] !== cors_api_host) {
+            args[1] = cors_api_url + args[1];
+        }
+        return open.apply(this, args);
+    };
+})();
+```
+
+If you're using jQuery, you can also use the following code **instead of** the previous one:
+
+```javascript
+jQuery.ajaxPrefilter(function(options) {
+    if (options.crossDomain && jQuery.support.cors) {
+        options.url = 'https://cors-anywhere.herokuapp.com/' + options.url;
+    }
+});
+```
+
+### Server
+
+The module exports `createServer(options)`, which creates a server that handles
+proxy requests. The following options are supported:
+
+* function `getProxyForUrl` - If set, specifies which intermediate proxy to use for a given URL.
+  If the return value is void, a direct request is sent. The default implementation is
+  [`proxy-from-env`](https://github.com/Rob--W/proxy-from-env), which respects the standard proxy
+  environment variables (e.g. `https_proxy`, `no_proxy`, etc.).  
+* array of strings `originBlacklist` - If set, requests whose origin is listed are blocked.  
+  Example: `['https://bad.example.com', 'http://bad.example.com']`
+* array of strings `originWhitelist` - If set, requests whose origin is not listed are blocked.  
+  If this list is empty, all origins are allowed.
+  Example: `['https://good.example.com', 'http://good.example.com']`
+* function `checkRateLimit` - If set, it is called with the origin (string) of the request. If this
+  function returns a non-empty string, the request is rejected and the string is send to the client.
+* boolean `redirectSameOrigin` - If true, requests to URLs from the same origin will not be proxied but redirected.
+  The primary purpose for this option is to save server resources by delegating the request to the client
+  (since same-origin requests should always succeed, even without proxying).
+* array of strings `requireHeader` - If set, the request must include this header or the API will refuse to proxy.  
+  Recommended if you want to prevent users from using the proxy for normal browsing.  
+  Example: `['Origin', 'X-Requested-With']`.
+* array of lowercase strings `removeHeaders` - Exclude certain headers from being included in the request.  
+  Example: `["cookie"]`
+* dictionary of lowercase strings `setHeaders` - Set headers for the request (overwrites existing ones).  
+  Example: `{"x-powered-by": "CORS Anywhere"}`
+* number `corsMaxAge` - If set, an Access-Control-Max-Age request header with this value (in seconds) will be added.  
+  Example: `600` - Allow CORS preflight request to be cached by the browser for 10 minutes.
+* string `helpFile` - Set the help file (shown at the homepage).  
+  Example: `"myCustomHelpText.txt"`
+
+For advanced users, the following options are also provided.
+
+* `httpProxyOptions` - Under the hood, [http-proxy](https://github.com/nodejitsu/node-http-proxy)
+  is used to proxy requests. Use this option if you really need to pass options
+  to http-proxy. The documentation for these options can be found [here](https://github.com/nodejitsu/node-http-proxy#options).
+* `httpsOptions` - If set, a `https.Server` will be created. The given options are passed to the
+  [`https.createServer`](https://nodejs.org/api/https.html#https_https_createserver_options_requestlistener) method.
+
+For even more advanced usage (building upon CORS Anywhere),
+see the sample code in [test/test-examples.js](test/test-examples.js).
+
+### Demo server
+
+A public demo of CORS Anywhere is available at https://cors-anywhere.herokuapp.com. This server is
+only provided so that you can easily and quickly try out CORS Anywhere. To ensure that the service
+stays available to everyone, the number of requests per period is limited, except for requests from
+some explicitly whitelisted origins.
+
+If you expect lots of traffic, please host your own instance of CORS Anywhere, and make sure that
+the CORS Anywhere server only whitelists your site to prevent others from using your instance of
+CORS Anywhere as an open proxy.
+
+For instance, to run a CORS Anywhere server that accepts any request from some example.com sites on
+port 8080, use:
+```
+export PORT=8080
+export CORSANYWHERE_WHITELIST=https://example.com,http://example.com,http://example.com:8080
+node server.js
+```
+
+This application can immediately be run on Heroku, see https://devcenter.heroku.com/articles/nodejs
+for instructions. Note that their [Acceptable Use Policy](https://www.heroku.com/policy/aup) forbids
+the use of Heroku for operating an open proxy, so make sure that you either enforce a whitelist as
+shown above, or severly rate-limit the number of requests.
+
+For example, to blacklist abuse.example.com and rate-limit everything to 50 requests per 3 minutes,
+except for my.example.com and my2.example.com (which may be unlimited), use:
+
+```
+export PORT=8080
+export CORSANYWHERE_BLACKLIST=https://abuse.example.com,http://abuse.example.com
+export CORSANYWHERE_RATELIMIT='50 3 my.example.com my2.example.com'
+node server.js
+```
+
 
 ## License
-The project is licensed under the AGPLv3 license - see the license file for details.
-I'd appreciate a sensible usage.
+
+Copyright (C) 2013 - 2016 Rob Wu <rob@robwu.nl>
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
