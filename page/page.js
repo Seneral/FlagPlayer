@@ -2935,12 +2935,12 @@ function ui_updateTimelinePeeking (mouse) {
 
 function ui_showControlBar () {
 	ui_controlBarCnt = 0;
-	controlBar.removeAttribute("retracted");
+	sec_player.removeAttribute("retracted");
 	ct_temp.showControlBar = true;
 }
 function ui_hideControlBar () {
 	ui_controlBarCnt = 10*3;
-	controlBar.setAttribute("retracted", "");
+	sec_player.setAttribute("retracted", "");
 	ct_temp.showControlBar = false;
 	I("volumeSlider").parentElement.removeAttribute("interacting");
 }
@@ -3323,28 +3323,27 @@ function onMouseScroll (mouse) {
 /* -------------------- */
 
 function onKeyDown (keyEvent) {
-	if (event.defaultPrevented) return;
+	if (keyEvent.defaultPrevented) return;
 	if (document.activeElement.tagName == "INPUT") return;
-	if (event.altKey || event.ctrlKey || event.shiftKey) return;
 	var pass = false;
 	switch (keyEvent.key) {
-		case " ": 
+		case " ": case "k":
 			ct_mediaPlayPause(!ct_paused, true);
 			break;
-		case "Left": case "ArrowLeft": 
+		case "Left": case "ArrowLeft": case "j": 
 			ct_beginSeeking();
 			md_updateTime(ct_curTime - 5);
 			break;
-		case "Right": case "ArrowRight": 
+		case "Right": case "ArrowRight": case "l":
 			ct_beginSeeking();
 			md_updateTime(ct_curTime + 5);
 			break;
 		case "Up": case "ArrowUp": 
-			md_updateVolume(ct_pref.volume + 0.05);
+			md_updateVolume(ct_pref.volume + 0.1);
 			ct_savePreferences();
 			break
 		case "Down": case "ArrowDown": 
-			md_updateVolume(ct_pref.volume - 0.05);
+			md_updateVolume(ct_pref.volume - 0.1);
 			ct_savePreferences();
 			break;
 		case "f": 
@@ -3354,8 +3353,19 @@ function onKeyDown (keyEvent) {
 		case "m": 
 			onControlMute();
 			break;
+		case "n": 
+			if(keyEvent.shiftKey) 
+				onControlNext();
+			break;
+		case "p": 
+			if(keyEvent.shiftKey) 
+				onControlPrev();
+			break;
 		default:
-			pass = true;
+			if (keyEvent.keyCode >= 48 && keyEvent.keyCode <= 57)
+				md_updateTime(ct_totalTime * (keyEvent.keyCode-48)/10);
+			else
+				pass = true;
 	}
 	if (!pass) {
 		event.preventDefault();
@@ -3659,11 +3669,11 @@ function md_forceStartMedia() {
 		console.warn("--- Attempt timed out!");
 		timeout = true; // Try again
 		md_attemptPlayStarted = false;
-		//md_pause();
-		//if (!md_attemptPause) md_forceStartMedia();
+		md_pause();
+		if (!md_attemptPause) md_forceStartMedia();
 		md_attemptPause = false;
 		ct_mediaReady();
-	}, 1000);
+	}, 500);
 	var attemptFinally = function() {
 		if (timeout && !attemptError) {
 			md_assureSync();
