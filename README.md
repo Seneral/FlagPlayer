@@ -1,11 +1,11 @@
 
-**CORS Anywhere** is a NodeJS proxy which adds CORS headers to the proxied request.  
-**This is an unsafe, non-production-ready version of CORS Anywhere!**  
-It allows for a lot more things that are considered unsafe like passing cookies (manually or from browser), emulating headers of browser request or fetches from the initial site, etc.  
-Don't ever host this publicly without proper safety measures (refer to Cors Anywhere Docs), you can do bad stuff with this and the code has also not been written with public usage in mind.  
-Start Server: ./CorsServer.sh (Unix) or double click CorsServer.bat (Windows)  
-It is a standard NodeJS server (Node.js is a JavaScript runtime that allows execution of javascript locally)  
-Rest of the readme is unmodified.  
+**CORS Anywhere** is a NodeJS proxy which adds CORS headers to the proxied request.
+**This is an unsafe, non-production-ready version of CORS Anywhere!**
+It allows for a lot more things that are considered unsafe like passing cookies (manually or from browser), emulating headers of browser request or fetches from the initial site, etc.
+Don't ever host this publicly without proper safety measures (refer to Cors Anywhere Docs), you can do bad stuff with this and the code has also not been written with public usage in mind.
+Start Server: ./CorsServer.sh (Unix) or double click CorsServer.bat (Windows)
+It is a standard NodeJS server (Node.js is a JavaScript runtime that allows execution of javascript locally)
+Rest of the readme is unmodified.
 
 
 The url to proxy is literally taken from the path, validated and proxied. The protocol
