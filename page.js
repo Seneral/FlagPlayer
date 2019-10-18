@@ -139,7 +139,7 @@ var db_playlists; // [ { listID, title, description, author, count, thumbID, vid
 var Page = { None: 0, Home: 1, Media: 2, Search: 3, Channel: 4, Playlist: 5 }
 var ct_page = Page.Home;
 var ct_pagePlaylist;
-var ct_temp = { fullscreen: false, options: false, settings: false, } // options: player; settings: page 
+var ct_temp = { fullscreen: false, options: false, settings: false, loop: false, } // options: player; settings: page 
 var ct_pagedContent = []; // id, container, autoTrigger, triggerDistance, aborted, loading, loadFunc, page, data
 var ct_isDesktop;
 
@@ -648,6 +648,11 @@ function ct_mediaError (error) {
 }
 function ct_mediaEnded () {
 	md_pause ();
+	if (ct_temp.loop) {
+		md_updateTime(0);
+		md_checkStartMedia();
+		return;
+	}
 	ct_state = State.Ended;
 	ct_flags.buffering = false;
 	ct_curTime = ct_totalTime;
@@ -679,6 +684,8 @@ function ct_mediaUnload () {
 	ui_resetRelatedVideos();
 	ui_resetComments();
 	ui_updatePlayerState();
+
+	ct_temp.loop = false;
 }
 
 
@@ -2120,7 +2127,8 @@ function ui_updateSoundState () {
 }
 function ui_updateOptionsState () {
 	setDisplay("optionsPanel", ct_temp.options? "flex" : "none");
-	I("optionsButton").setAttribute("state", ct_temp.options? "on" : "off"); 
+	I("optionsButton").setAttribute("state", ct_temp.options? "on" : "off");
+	I("loopToggle").checked = ct_temp.loop;
 }
 function ui_updateStreamState (selectedStreams) {
 	I("legacyStreamToggle").checked = !ct_pref.dash;
@@ -3041,6 +3049,7 @@ function ui_setupEventHandlers () {
 	I("select_dashVideo").onchange = onSelectStreams;
 	I("select_dashAudio").onchange = onSelectStreams;
 	I("legacyStreamToggle").onchange = onToggleLegacyStream;
+	I("loopToggle").onchange = onToggleLoop;
 	// Playlist
 	I("plClose").onclick = ct_resetPlaylist;
 	I("plSave").onclick = db_savePlaylist;
@@ -3174,6 +3183,10 @@ function onToggleOptions () {
 	ct_temp.options = !ct_temp.options;
 	ui_updateOptionsState();
 	ui_updateControlBar();
+}
+function onToggleLoop() {
+	ct_temp.loop = !ct_temp.loop;
+	ui_updateOptionsState();
 }
 function onToggleLegacyStream() {
 	ct_pref.dash = !ct_pref.dash;
