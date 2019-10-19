@@ -68,6 +68,9 @@ A simple YouTube Web-App focussed on music playback
 Note: You need to start it every time OR set it up as a service  
 You can also copy the .bat/.sh and put it on your desktop - just edit it to point to the yt-server.js file  
 
+##### Why a CORS server?	
+As any website scraping other website's content, a reverse-proxy needs to be set up so that the CORS policy doesn't block the request.
+
 ## Motivation
 - YouTube is terribly bloated and loads embarassingly slow
 - YouTube has several bugs hindering effective playback
