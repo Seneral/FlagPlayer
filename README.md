@@ -7,11 +7,12 @@ A simple YouTube Web-App focussed on music playback
 - No third party code used
 - Only 110kb - much smaller than YouTube and even Invidious. With care and compression, only 30kb download
 - Standard player features (select streams freely, e.g. audio only)
+- No arbitrary restrictions (e.g. background playback on mobile)
 - Prooven interface including dark and light theme
 - Basic settings
 - Save and cache playlists in local database 
 - Watch page including:
-	- Comments and Threads (only on custom local server)
+	- Comments and Threads
 	- Related videos (excluding mixes and livestreams for now)
 	- Playlists large and small
 - Search (videos only) with filtering by category
@@ -44,15 +45,18 @@ A simple YouTube Web-App focussed on music playback
 ## How To Use
 
 #### Hosts:  
-- Official Host (No CORS Backend): https://flagplayer.seneral.dev  
+- Official Host: https://flagplayer.seneral.dev  
 
 #### Local Project:  
 
 1. Download the project
-2. Load up /page/index.html
-3. Search for videos or enter a playlist id in the search bar  
+2. Select a public CORS host (see /page/page.js, l.205 below HOST_CORS) or set up your own (see below)   
+3. Load up /page/index.html  
+4. Open the settings in FlagPlayer (gear top right)  
+5. Set the CORS host field to your selected CORS host (default is restricted to official website)   
+6. Search for videos or enter a playlist id in the search bar  
 
-#### Advanced Server for comments:  
+#### Local CORS Server:  
 
 1. On Windows: Execute /server/CorsServer.bat
 2. On Linux: Execute /server/CorsServer.sh
@@ -63,16 +67,6 @@ A simple YouTube Web-App focussed on music playback
 
 Note: You need to start it every time OR set it up as a service  
 You can also copy the .bat/.sh and put it on your desktop - just edit it to point to the yt-server.js file  
-
-## Server Requirements
-As any website scraping other website's content, a reverse-proxy needs to be set up so that the CORS policy doesn't block the request. There are a few freely available servers out there, but for actual usage you should NEVER rely on them:  
-
-1. They're usually slow and not very reliable
-2. They provide the service for testing purposes, NOT constant usage - you might get blocked
-3. Custom local server allows you to see comments  
-
-So follow the Instructions above to set up a local server.  
-This is a modified CORS Anywhere server that differs in that it passes certain cookies and modifies the header to look like genuine same-origin requests. DO NOT host this server publicly, there are no safeguards activated to prevent abuse of your network.
 
 ## Motivation
 - YouTube is terribly bloated and loads embarassingly slow
