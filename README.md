@@ -49,7 +49,7 @@ A simple YouTube Web-App focussed on music playback
 
 #### Local Project:  
 
-1. Download the project
+1. Download the project (master)
 2. Select a public CORS host (see /page/page.js, l.205 below HOST_CORS) or set up your own (see below)   
 3. Load up /page/index.html  
 4. Open the settings in FlagPlayer (gear top right)  
@@ -58,12 +58,14 @@ A simple YouTube Web-App focussed on music playback
 
 #### Local CORS Server:  
 
-1. On Windows: Execute /server/CorsServer.bat
-2. On Linux: Execute /server/CorsServer.sh
-3. Note your local server adress as displayed in the console, usually http://localhost:8080
-4. Open the settings in FlagPlayer (gear top right)
-5. Enter local server adress into the Cors Server field
-6. Reload page and enjoy comments  
+1. Download the project (master)
+2. Install [node.js](https://nodejs.org)
+3. On Windows: Execute /server/CorsServer.bat
+4. On Linux: Execute /server/CorsServer.sh
+5. Note your local server adress as displayed in the console, usually http://localhost:8080
+6. Open the settings in FlagPlayer (gear top right)
+7. Enter local server adress into the Cors Server field
+8. Reload page and enjoy comments  
 
 Note: You need to start it every time OR set it up as a service  
 You can also copy the .bat/.sh and put it on your desktop - just edit it to point to the yt-server.js file  
