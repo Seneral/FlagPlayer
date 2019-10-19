@@ -187,12 +187,14 @@ var yt_playlistLoaded; // Event triggered when playlist is fully loaded
 var ct_isAdvancedCorsHost; // Boolean: Supports cookie-passing for (with others) comments
 var ct_traversedHistory; // Prevent messing with history when traversing
 var ct_timerAutoplay; // Timer ID for video end autoplay timer
-var ui_controlBarCnt; // For control bar retraction when mouse is unmoving
+var ui_cntControlBar; // For control bar retraction when mouse is unmoving
 var ui_timerIndicator; // Timer ID for the current temporary indicator (pause/plax) on the video screen
 var ui_dragSlider; // Currently dragging a slider?
 var ui_dragSliderElement; // Currently dragged slider element 
-var md_timerSyncTimes; // Timer ID for next media sync attempt (dash only)
+var md_timerSyncMedia; // Timer ID for next media sync attempt (dash only)
 var md_timerCheckBuffering; // Timer ID for next media buffering check (and start video when ready)
+var md_cntBufferPause; // Count of intervals (50ms) in which buffered amount did not change
+var md_lastBuffer; // Last known buffered amount, used because buffered events don't always fire
 var md_attemptPlayStarted; // Flag to prevent multiple simultaneous start play attempts
 var md_attemptPause; // Flag to indicate play start attempt is to be aborted
 
@@ -614,7 +616,7 @@ function ct_mediaLoaded () {
 }
 function ct_mediaReady () {
 	ct_flags.buffering = false;
-	if (ct_paused) // Means media is ready, but playback was denied
+	if (ct_paused && ct_state == State.Loading) // Means media is ready, but playback was denied
 		ct_state = State.PreStart;
 	else // Playback start was successful
 		ct_state = State.Started;
@@ -634,9 +636,6 @@ function ct_mediaError (error) {
 		ui_updateStreamState();
 		return;
 	}
-	if (error.message.includes ("DOMException")) {
-		return;
-	}
 	md_resetStreams();
 	ct_state = State.Error;
 	ct_paused = true;
@@ -644,7 +643,7 @@ function ct_mediaError (error) {
 	ct_flags.seeking = false;
 	ui_updatePlayerState();
 	if (mediaError) console.error(error.target.tagName + " encountered an error: " + mediaError.message + " - code " + mediaError.code);
-	else console.error(error);
+	else console.error(error.message + " (" + error.code + ")");
 }
 function ct_mediaEnded () {
 	md_pause ();
@@ -1585,7 +1584,7 @@ function yt_extractVideoMetadata() {
 			} else {
 				var subButton = secondary.subscribeButton.buttonRenderer;
 				if (!subButton.isDisabled && subButton.text.runs) 
-					yt_video.meta.uploader.subscribers = yt_parseNum(subButton.text.runs[1].text);
+					yt_video.meta.uploader.subscribers = subButton.text.runs[1]? yt_parseNum(subButton.text.runs[1].text) : 0;
 			}
 
 		} catch (e) { console.error("Failed to read video metadata!", e, yt_page.initialData.contents); }
@@ -2947,12 +2946,12 @@ function ui_updateTimelinePeeking (mouse) {
 /* -------------------- */
 
 function ui_showControlBar () {
-	ui_controlBarCnt = 0;
+	ui_cntControlBar = 0;
 	sec_player.removeAttribute("retracted");
 	ct_temp.showControlBar = true;
 }
 function ui_hideControlBar () {
-	ui_controlBarCnt = 10*3;
+	ui_cntControlBar = 10*3;
 	sec_player.setAttribute("retracted", "");
 	ct_temp.showControlBar = false;
 	I("volumeSlider").parentElement.removeAttribute("interacting");
@@ -2970,8 +2969,8 @@ function ui_updateControlBar (mouse) { // MouseEvent + 100ms Interval
 				}
 			} else ui_hideControlBar();
 		} else { // Interval - Hide when mouse unmoved
-			if (ui_controlBarCnt > 10*3) ui_hideControlBar();
-			else ui_controlBarCnt++;
+			if (ui_cntControlBar > 10*3) ui_hideControlBar();
+			else ui_cntControlBar++;
 		}
 	} else ui_showControlBar(); // Force show on pause / buffering / seeking
 }
@@ -3422,7 +3421,11 @@ function onMediaStalled () {
 	console.log("WARNING: " + this.tagName + " stalled!");
 }
 function onMediaSuspended () {
-	console.log("WARNING: " + this.tagName + " suspended!");
+	// If video is suspended, waiting for more data to load is useless
+	// Only used in cases where browser caps buffer ahead to ~2-3s for no reason
+	if (this.tagName == "VIDEO")
+		md_cntBufferPause += 8;
+	//console.log("WARNING: " + this.tagName + " suspended!");
 	//md_assureSync();
 }
 function onMediaWaiting () {
@@ -3430,6 +3433,8 @@ function onMediaWaiting () {
 	md_assureSync();
 }
 function onMediaBuffering () {
+	if (ct_state == State.Started && !ct_flags.buffering)
+		md_assureBuffer();
 	ui_updateTimelineBuffered();
 }
 function onMediaEnded () {
@@ -3591,8 +3596,7 @@ function md_checkStartMedia() {
 		else { // Enter prestart
 			ct_paused = true;
 			ct_mediaReady();
-		} 
-			
+		}
 	}
 }
 function md_checkBuffering(forceBuffer) {
@@ -3610,40 +3614,44 @@ function md_checkBuffering(forceBuffer) {
 	// Get current buffer in front of current position
 	var bufferedAhead = md_getBufferedAhead();
 	var finishedBuffering = ct_curTime + bufferedAhead > ct_totalTime-1;
-	bufferedAhead = bufferedAhead-bufferedAhead%1;
+	if (bufferedAhead >= md_lastBuffer) md_cntBufferPause = 0;
+	md_lastBuffer = bufferedAhead-bufferedAhead%0.1+0.1;
+
 	// Decide if buffering is needed / should continue
 	if (ct_flags.buffering) { // Known to need buffering (preloading or interrupted)
-		if (bufferedAhead > 1 || finishedBuffering) {
-			console.info("MD: Finished buffering " + bufferedAhead + "s ahead!");
+		if ((bufferedAhead >= 2 && md_cntBufferPause > 10) || bufferedAhead >= 4 || finishedBuffering) {
+			console.info("MD: Finished buffering " + bufferedAhead.toFixed(0) + "s ahead!");
 			if (!ct_paused) {
 				console.info("MD: Starting media playback!");
 				md_forceStartMedia();
+				md_assureBuffer();
 			} else {
-				ct_flags.buffering = false;
-				ui_updatePlayerState();
+				ct_mediaReady();
 			}
 		} else { // Recheck until buffering is finished
-			console.info("MD: Buffering " + bufferedAhead + "s ahead!");
-			md_timerCheckBuffering = setTimeout(md_checkBuffering, 250);
+			console.info("MD: Buffering " + bufferedAhead.toFixed(0) + "s ahead!");
+			md_timerCheckBuffering = setTimeout(md_checkBuffering, 500);
+			md_cntBufferPause++;
 		}
 	} else { // Suspect buffering from waiting event or resume operation
 		if (!ct_paused && videoMedia.paused && audioMedia.paused) {
-			if (bufferedAhead > 1 || finishedBuffering) {
+			if (bufferedAhead >= 4 || finishedBuffering) {
 				console.info("MD: Starting media playback!");
 				md_forceStartMedia();
+				md_assureBuffer();
 			} else {
 				console.info("MD: Start buffering!");
 				ct_flags.buffering = true;
 				ui_updatePlayerState();
-				md_timerCheckBuffering = setTimeout(md_checkBuffering, 250);
+				md_timerCheckBuffering = setTimeout(md_checkBuffering, 500);
 			}
 		}
-		else if (!finishedBuffering && (bufferedAhead < 1 || forceBuffer)) {
+		else if (!finishedBuffering && (bufferedAhead <= 1.5 || forceBuffer)) {
 			console.info("MD: Start buffering!");
 			md_pause();
 			ct_flags.buffering = true;
 			ui_updatePlayerState();
-			md_timerCheckBuffering = setTimeout(md_checkBuffering, 250);
+			md_timerCheckBuffering = setTimeout(md_checkBuffering, 500);
 		}
 	}
 }
@@ -3679,22 +3687,23 @@ function md_forceStartMedia() {
 	// Attempt to start playing
 	md_attemptPlayStarted = true;
 	var waitForOther = (ct_sources.video != false) && (ct_sources.audio != false);
-	var attemptError = undefined;
+	var attemptError, attemptAborted;
 	// Note: Timeout usually means it doesn't have an error and it already started playing - the promise just concludes late (sometimes up to a second too late)
 	// Any attempts to restart usually are bad - usually audio (and video) started playing already, video a bit delayed, so just sync as normal and prevent audio jumps
 	var timeout = false;
 	var attemptTimeout = setTimeout (function() {
 		console.warn("--- Attempt timed out!");
 		timeout = true; // Try again
-		md_attemptPlayStarted = false;
-		md_pause();
-		if (!md_attemptPause) md_forceStartMedia();
-		md_attemptPause = false;
-		ct_mediaReady();
+		videoMedia.pause();
+		audioMedia.pause();
 	}, 500);
 	var attemptFinally = function() {
-		if (timeout && !attemptError) {
-			md_assureSync();
+		if (timeout) {
+			ct_curTime = time;
+			if (!md_attemptPause)
+				setTimeout(md_checkStartMedia, 500);
+			md_attemptPause = false;
+			md_attemptPlayStarted = false;
 			return;
 		} // Leftover promise call after timeout
 		clearTimeout(attemptTimeout);
@@ -3705,15 +3714,18 @@ function md_forceStartMedia() {
 			return;
 		}
 		if (attemptError) {
+			ct_paused = true;
+			md_pause();
 			if (attemptError.name == "NotAllowedError") {
 				console.warn("--- Automatic playback rejected!");
-				ct_paused = true;
-				md_pause();
+				attemptAborted = true;
 				ct_mediaReady();
-			} else {
+			} else if (!attemptError instanceof DOMException) {
 				console.error("--- Failed to start media playback!");
-				ct_curTime = time;
 				ct_mediaError(attemptError);
+				setTimeout(md_checkStartMedia, 500);
+			} else if (!attemptAborted) {
+				setTimeout(md_checkStartMedia, 500);
 			}
 		} else {
 			console.log("--- MD: Started media playback!");
@@ -3722,16 +3734,14 @@ function md_forceStartMedia() {
 		}
 	}
 	var attemptPlay = function(media) {
-		var promise = media.play();
-		promise.catch(error => {
-			console.warn("--- Failed to start " + media.tagName + " stream!");
-			attemptError = error;
+		media.play().then(_ => {
+			console.info("--- MD: Started " + media.tagName + " stream!");
 			if (waitForOther) waitForOther = false;
 			else attemptFinally();
-		});
-		promise.then(_ => {
-			console.info("--- MD: Started " + media.tagName + " stream! ");
-			if (waitForOther) waitForOther = false;
+		}).catch(error => {
+			console.warn("--- Failed to start " + media.tagName + " stream!");
+			attemptError = error;
+			if (waitForOther && attemptError.name != "NotAllowedError") waitForOther = false;
 			else attemptFinally();
 		});
 	};
@@ -3739,8 +3749,18 @@ function md_forceStartMedia() {
 	if (ct_sources.video) attemptPlay(videoMedia);
 	if (ct_sources.audio) attemptPlay(audioMedia);
 }
+function md_assureBuffer () {
+	clearTimeout(md_timerCheckBuffering);
+	bufferedAhead = md_getBufferedAhead();
+	md_timerCheckBuffering = setTimeout(function () {
+		if (ct_state == State.Started && !ct_flags.buffering) {
+			//console.log(bufferedAhead*1000 + "ms in the future: " + md_getBufferedAhead()*1000);
+			md_checkBuffering();
+		}
+	}, (bufferedAhead-1)*1000);
+}
 function md_assureSync () {
-	clearTimeout(md_timerSyncTimes);
+	clearTimeout(md_timerSyncMedia);
 	if (ct_sources && ct_sources.video && ct_sources.audio && !md_attemptPlayStarted) {
 		var syncTimes = function (syncSignificance) {
 			if (ct_sources && ct_sources.video && ct_sources.audio) {
@@ -3751,7 +3771,7 @@ function md_assureSync () {
 						videoMedia.currentTime = audioMedia.currentTime + Math.max(0, Math.min(0.1, Math.abs(timeDiff)/2));
 						console.info("MD: Sync Error: " + timeDiffLabel + " - Fixing!");
 						md_checkBuffering(); // Incase video was hidden (diff multiple seconds), video might not have been buffered
-						if (!ct_flags.buffering) md_timerSyncTimes = setTimeout(() => syncTimes(syncSignificance + 0.05), 1000*(syncSignificance + 0.1));
+						if (!ct_flags.buffering) md_timerSyncMedia = setTimeout(() => syncTimes(syncSignificance + 0.05), 1000*(syncSignificance + 0.1));
 					} else console.info("MD: Sync Error: " + timeDiffLabel + "!");
 				} else {
 					videoMedia.currentTime = ct_curTime;
@@ -3759,7 +3779,7 @@ function md_assureSync () {
 				}
 			}
 		}
-		md_timerSyncTimes = setTimeout(() => syncTimes(0.05), 100);
+		md_timerSyncMedia = setTimeout(() => syncTimes(0.05), 100);
 	}
 }
 
@@ -4123,11 +4143,12 @@ var ITAGS = {
 328: { },
 
 // Curious unknown formats
-394: { x:  256,  y: 144, hdr:  false, fps: 30, ss3D: false, hls: false },
-395: { x:  426,  y: 240, hdr:  false, fps: 30, ss3D: false, hls: false },
-396: { x:  640,  y: 360, hdr:  false, fps: 30, ss3D: false, hls: false },
-397: { x:  854,  y: 480, hdr:  false, fps: 30, ss3D: false, hls: false },
-398: { x: 1280,  y: 720, hdr:  false, fps: 30, ss3D: false, hls: false },
+394: { x:  256,  y:  144, hdr:  false, fps: 30, ss3D: false, hls: false },
+395: { x:  426,  y:  240, hdr:  false, fps: 30, ss3D: false, hls: false },
+396: { x:  640,  y:  360, hdr:  false, fps: 30, ss3D: false, hls: false },
+397: { x:  854,  y:  480, hdr:  false, fps: 30, ss3D: false, hls: false },
+398: { x: 1280,  y:  720, hdr:  false, fps: 30, ss3D: false, hls: false },
+399: { x: 1920,  y: 1080, hdr:  false, fps: 30, ss3D: false, hls: false },
 }
 
 var CATEGORIES = {
