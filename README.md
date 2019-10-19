@@ -4,8 +4,8 @@ A simple YouTube Web-App focussed on music playback
 
 - Free, easy to modify and all important stuff happens client-side
 - No official YouTube API used
-- No third party code used
-- Only 110kb - much smaller than YouTube and even Invidious. With care and compression, only 30kb download
+- No third party code used (yes, not even a media player)
+- Only 30kb (download) / 110kb (memory) - much smaller than YouTube and even Invidious
 - Standard player features (select streams freely, e.g. audio only)
 - No arbitrary restrictions (e.g. background playback on mobile)
 - Prooven interface including dark and light theme
@@ -70,8 +70,14 @@ A simple YouTube Web-App focussed on music playback
 Note: You need to start it every time OR set it up as a service  
 You can also copy the .bat/.sh and put it on your desktop - just edit it to point to the yt-server.js file  
 
-##### Why a CORS server?	
-As any website scraping other website's content, a reverse-proxy needs to be set up so that the CORS policy doesn't block the request.
+## Implementation
+
+#### Why a separate server?	
+Direct request from one website to another website are usually blocked by the browser itself according to the CORS prolicy to prevent XSRF. For any website scraping other website's content that means a reverse-proxy needs to be set up so that the CORS policy doesn't block the request.
+
+#### How does media playback work?
+YouTube uses something calles MSE to exactly control the behaviour of buffering (loading) - since that means all request are script-controlled, all media fetch requests would now fall under the CORS policy and would have to be proxied. Since that would add immense load on public servers, I've chosen to make a hacky replacement to support DASH streams (where audio and video is separated), which works for most videos up to 2k. Additionally, the legacy streams (audio and video combined, only up to 720p) are supported as well.
+This does however mean that buffering, etc. is still handled by the browser, and it subject to it's whims and bugs. Sometimes, a promise to start a stream will never resolve (Chrome), and the stream has to be restarted, resulting in audio glitches. Sometimes, the browser might arbitrarily decide to lower the buffering size, effectively preventing preload of anything more than 2s of video - especially a problem on low-bandwidth networks.
 
 ## Motivation
 - YouTube is terribly bloated and loads embarassingly slow
