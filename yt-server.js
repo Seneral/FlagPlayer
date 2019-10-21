@@ -25,7 +25,7 @@ cors_proxy.createServer({
     setHeaders : {
     },
     httpProxyOptions: {
-        xfwd: false,
+        xfwd: true,
     },
 }).listen(process.env.PORT, function() {
   console.log('Running CORS YT on ' + process.env.PORT);
