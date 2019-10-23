@@ -21,6 +21,12 @@ See https://github.com/Seneral/FlagPlayer for details
 </head>
 <body class="mobile theme-dark noselect">
 
+	<script type="text/javascript">
+		var theme = localStorage.getItem("prefTheme") || "DARK";
+		document.body.className = document.body.className.replace(/\s?theme-[a-zA-Z]+\s?/gi, ' ');
+		document.body.classList.add("theme-" + theme.toLowerCase());
+	</script>
+
 	<header class="header">
 		<div class="side left">
 			<a class="headerIcon flagPlayerLogo" href="index.html">
@@ -120,7 +126,7 @@ See https://github.com/Seneral/FlagPlayer for details
 							<option value="webm">WebM</option>
 						</select>
 						<select id="select_dashVideo" class="selector rightControl"></select>
-						<select id="select_dashAudio" class="selector rightControl""></select>
+						<select id="select_dashAudio" class="selector rightControl"></select>
 					</div>
 					<div>
 						<span>Legacy Streams:</span>
@@ -386,6 +392,14 @@ See https://github.com/Seneral/FlagPlayer for details
 						<option value="NEXT">Next</option>
 						<option value="ALL">All</option>
 					</select>
+				</div>
+				<div>
+					<span>Load Comments</span>
+					<label class="switch rightControl">
+						<input type="checkbox" id="st_comments">
+						<span class="background"></span>
+						<span class="knob"></span>
+					</label>
 				</div>
 				<div>
 					<span>CORS Host</span>
