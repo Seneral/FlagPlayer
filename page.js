@@ -257,6 +257,7 @@ function ct_loadPreferences () {
 	ct_pref.relatedVideos = G("prefRelated") || "ALL";
 	ct_pref.filterCategories = (G("prefFilterCategories") || "").split(",").map(c => parseInt(c));
 	ct_pref.filterHideCompletely = G("prefFilterHideCompletely") == "false"? false : true;
+	ct_pref.loadComments = G("prefLoadComments") == "false"? false : true;
 }
 function ct_savePreferences () {
 	// Playback Options
@@ -276,6 +277,7 @@ function ct_savePreferences () {
 	S("prefRelated", ct_pref.relatedVideos);
 	S("prefFilterCategories", ct_pref.filterCategories.join(","));
 	S("prefFilterHideCompletely", ct_pref.filterHideCompletely);
+	S("prefLoadComments", ct_pref.loadComments);
 	S("prefCorsAPIHost", ct_pref.corsAPIHost);
 }
 
@@ -1783,7 +1785,7 @@ function yt_extractVideoCommentData () {
 	
 	yt_video.commentData.comments = [];
 
-	if (yt_video.commentData.conToken && ct_isAdvancedCorsHost) { // Advanced host required for cookies
+	if (yt_video.commentData.conToken && ct_isAdvancedCorsHost && ct_pref.loadComments) { // Advanced host required for cookies
 		ct_registerPagedContent("CM", I("vdCommentList"), yt_loadMoreComments, 100, yt_video.commentData);
 		ct_checkPagedContent();
 	}
@@ -2002,6 +2004,7 @@ function yt_signStreams(signTransformation) {
 		if (stream.cipher) // Encoded on mobile: s, url, sp
 			new URLSearchParams (stream.cipher).forEach(function (v, n) { stream[n] = v; });
 		stream.url = stream.url + "&" + (stream.sp || "sig") + "=" + encodeURIComponent(signFunc(stream.s));
+		if (!stream.url.includes("ratebypass")) stream.url += "&ratebypass=yes";
 	}
 }
 function yt_processStreams () {
@@ -2289,6 +2292,7 @@ function ui_openSettings () {
 	I("st_related").value = ct_pref.relatedVideos;
 	I("st_corsHost").value = ct_pref.corsAPIHost;
 	I("st_filter_hide").checked = ct_pref.filterHideCompletely;
+	I("st_comments").checked = ct_pref.loadComments;
 	var filterCats = I("st_filter_categories");
 	ui_fillCategoryFilter(filterCats);
 	filterCats.firstElementChild.innerText = filterCats.countUnselected() + " filtered";
@@ -3064,6 +3068,7 @@ function ui_setupEventHandlers () {
 	I("st_related").onchange = function () { onSettingsChange("RV"); };
 	I("st_filter_categories").onchange = function () { onSettingsChange("FV"); };
 	I("st_filter_hide").onchange = function () { onSettingsChange("FV"); };
+	I("st_comments").onchange = function () { onSettingsChange("CM"); };
 	I("st_corsHost").onchange = function () { onSettingsChange("CH"); };
 	// Search Bar
 	I("search_categories").onchange = onSearchUpdate;
@@ -3134,6 +3139,8 @@ function onSettingsChange (hint) {
 			I("st_filter_categories").firstElementChild.innerText = I("st_filter_categories").countUnselected() + " filtered";
 			ui_updateSearchResults();
 			break;
+		case "CM":
+			ct_pref.loadComments = I("st_comments").checked;
 		case "TH": 
 			ct_pref.theme = I("st_theme").value;
 			ui_updatePageState(); 
