@@ -116,7 +116,7 @@ See https://github.com/Seneral/FlagPlayer for details
 					</div>
 				</div>
 
-				<div class="optionsPanel popupPanel" id="optionsPanel">
+				<div class="optionsPanel" id="optionsPanel" style="display: none;">
 					<div id="legacyStreamGroup">
 						<select id="select_legacy" class="selector rightControl"></select>	
 					</div>
@@ -239,8 +239,6 @@ See https://github.com/Seneral/FlagPlayer for details
 							<button class="barAction script dropdown left down" id="videoContextActions">
 								<svg viewBox="6 6 36 36"><use href="#svg_hdots"/></svg>
 								<div class="dropdownContent">
-									<span tabindex="0" value="top">Top Comments</span>
-									<span tabindex="0" value="new">New Comments</span>
 									<a tabindex="0" class="youtubeLink" href="https://www.youtube.com" target="_blank">Watch on YouTube</a>
 								</div>
 							</button>
@@ -275,7 +273,17 @@ See https://github.com/Seneral/FlagPlayer for details
 				</aside>
 
 				<section class="section comments" id="comments">
-					<span id="vdCommentLabel">No comments for you!</span>
+					<div class="vdCommentHeader actionBar">
+						<span id="vdCommentLabel">No comments</span>
+						<div class="flexSpace"></div>
+						<button class="barAction script dropdown left down" id="commentContextActions">
+							<svg viewBox="6 6 36 36"><use href="#svg_hdots"/></svg>
+							<div class="dropdownContent">
+								<span tabindex="0" value="top">Top Comments</span>
+								<span tabindex="0" value="new">New Comments</span>
+							</div>
+						</button>
+					</div>
 					<div class="vdCommentList" id="vdCommentList"></div>
 				</section>
 

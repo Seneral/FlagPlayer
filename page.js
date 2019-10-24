@@ -3116,6 +3116,7 @@ function ui_setupEventHandlers () {
 	I("plUpdate").onclick = ct_updatePlaylist;
 	// Context
 	I("videoContextActions").onchange = onSelectContextAction;
+	I("commentContextActions").onchange = onSelectContextAction;
 	I("channelContextActions").onchange = onSelectContextAction;
 	// Settings Panel
 	I("st_theme").onchange = function () { onSettingsChange("TH"); };
@@ -4073,12 +4074,6 @@ function ht_appendCommentElement (container, commentID, authorNav, authorIMG, au
 	}
 	container.insertAdjacentHTML ("beforeEnd",
 		'<div class="cmContainer">' + 
-			'<button class="contextAction script dropdown left down">' +
-				'<svg viewBox="6 6 36 36"><use href="#svg_vdots"/></svg>' +
-				'<div class="dropdownContent">' +
-					'<a tabindex="0" href="' + yt_url + '&lc=' + commentID + '" target="_blank">Comment on YouTube</a>' +
-				'</div>' +
-			'</button>' +
 			'<div class="cmProfileColumn">' +
 				'<a class="overlayLink" navigation="' + authorNav + '" href="' + ct_getNavLink(authorNav) + '"></a>' + 
 				'<img class="cmProfileImg profileImg" src="' + authorIMG + '">' +
@@ -4087,7 +4082,9 @@ function ht_appendCommentElement (container, commentID, authorNav, authorIMG, au
 				'<a navigation="' + authorNav + '" href="' + ct_getNavLink(authorNav) + '">' + 
 					'<span class="cmAuthorName">' + authorName + '</span>' +
 				'</a>' +
-				'<span class="cmPostedDate">' + dateText + '</span>' +
+				'<a href="' + yt_url + '&lc=' + commentID + '" target="_blank">' +
+					'<span class="cmPostedDate">' + dateText + '</span>' +
+				'</a>' +
 				'<div class="cmBody collapsable">' +
 					'<div class="textContent collapsableText">' + commentText + '</div>' +
 					'<button class="cmCollapser collapser" more-text="Show More" less-text="Show Less"></button>' +
@@ -4095,7 +4092,7 @@ function ht_appendCommentElement (container, commentID, authorNav, authorIMG, au
 				'<div class="cmActionBar actionBar noselect">' +
 					'<button class="barAction"><svg viewBox="6 6 36 36"><use href="#svg_like"/></svg> ' + (likes? likes : "") + '</button>' +
 					'<button class="barAction"><svg viewBox="6 6 36 36"><use href="#svg_dislike"/></svg></button>' +
-					'<button class="barAction"><span>Reply</span></button>' +
+					'<a class="barAction" href="' + yt_url + '&lc=' + commentID + '" target="_blank">Reply</a>' +
 				'</div>' +
 		repliesContainer +
 			'</div>' +
