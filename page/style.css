@@ -1033,9 +1033,7 @@ button {
 	font: inherit;
 	background: none;
 	cursor: pointer;
-}
-.popupPanel {
-	display: none;
+	color: var(--txt-sec-color);
 }
 .blurred {
 	filter: blur(4px);
@@ -1066,6 +1064,32 @@ button {
 }
 
 
+/* --------------------------- */
+/* ---- NOTIFICATIONS -------- */
+/* --------------------------- */
+
+.notificationPanel {
+	z-index: 9;
+	position: fixed;
+	bottom: 0;
+	right: 0;
+	width: 100%;
+	display: flex;
+	line-height: 2em;
+	padding: 0.5em 1em;
+	background-color: var(--bg-sec-color);
+}
+.desktop .notificationPanel {
+	max-width: 40em;
+	max-width: fit-content;
+	margin: 1em;
+	border: 1px solid var(--bg-sec-acc-color);
+}
+.notificationDismiss {
+	margin-left: 2em;
+	height: 1em;
+	width: 2em; 
+}
 
 /* --------------------------- */
 /* ---- TEXT LABELS ---------- */
