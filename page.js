@@ -127,6 +127,11 @@ var timelineBuffered = I("tlBuffered");
 /* ---- VARIABLES -----	*/
 /* -------------------- */
 
+/* SERVICE WORKER */
+var sw_current;
+var sw_updated;
+var sw_refreshing;
+
 /* DATABASE */
 var db_database;
 var db_loading = false;
@@ -215,6 +220,55 @@ const HOST_CORS = "https://flagplayer-cors.herokuapp.com/"; // Default value onl
 //endregion
 
 /* -------------------------------------------------------------------------------------------------------------- */
+/* ----------------- SERVICE WORKER ----------------------------------------------------------------------------- */
+/* -------------------------------------------------------------------------------------------------------------- */
+
+function sw_install () { 
+	// Setup service worker for caching control
+	if ("serviceWorker" in navigator) {
+
+		navigator.serviceWorker.oncontrollerchange = function () {
+			if (sw_refreshing) return;
+			window.location.reload();
+			sw_refreshing = true;
+		};
+
+		navigator.serviceWorker.register("./sw.js").then(function(registration) {
+			// Get current service worker
+			sw_current = navigator.serviceWorker.controller;
+			if (sw_current) console.log("Successfully installed service worker: Caching and Offline Mode are available!");
+			else console.log("Successfully installed service worker: Caching and Offline Mode are available after reload!");
+			// Check for updates
+			registration.onupdatefound = function () {
+				if (!navigator.serviceWorker.controller) 
+					return; // not an update, but initial installation
+				console.log("Found new service worker version!");
+				var update = function () {
+					sw_updated = registration.waiting || registration.active;
+					setDisplay("newVersionPanel", "");
+					console.log("New service worker version ready for activation!");
+				};
+				var installing = registration.installing;
+				if (installing) {
+					installing.onstatechange = function () {
+						if (installing.state == "installed" || installing.state == "active") 
+							update();
+					};
+				}
+				else update();
+			};
+		}, function(e) {
+			console.warn("Failed to install service worker: Caching and Offline Mode will be unavailable!");
+		});
+	}
+}
+function sw_update () { 
+	sw_updated.postMessage({ action: "skipWaiting" });
+	setDisplay("newVersionPanel", "none");
+}
+
+
+/* -------------------------------------------------------------------------------------------------------------- */
 /* ----------------- CONTROL FUNCTIONS -------------------------------------------------------------------------- */
 /* -------------------------------------------------------------------------------------------------------------- */
 //region
@@ -232,6 +286,7 @@ function ct_init () {
 	ui_setupEventHandlers();
 	ct_readParameters();
 	ct_loadContent();
+	sw_install();
 }
 
 
@@ -763,7 +818,7 @@ function db_access (callback) {
 	if (db_loading) return;
 	db_loading = true;
 	// Start request
-	var request = indexedDB.open("ContentDatabase");
+	var request = indexedDB.open("ContentDatabase", 1);
 	request.onerror = function (e) { // Denied
 		console.error("Failed to open Database!", e);
 	};
@@ -2661,6 +2716,7 @@ function ui_setPlaylistPosition() {
 	videoContainer.scrollTop = Math.max(0, videoContainer.scrollHeight * ct_getVideoPlIndex() / videoContainer.childElementCount - 40);
 }
 function ui_checkPlaylist () {
+	if (!yt_playlist) return; // Unloaded
 	var container = I("plVideos");
 	ui_adaptiveListLoad(container, yt_playlist.videos.length, function (index) {
 		var video = yt_playlist.videos[index];
@@ -3074,6 +3130,9 @@ function ui_setupEventHandlers () {
 	I("search_categories").onchange = onSearchUpdate;
 	onToggleButton(I("search_hideCompletely"), onSearchUpdate);
 	I("searchContextActions").onchange = onSelectContextAction;
+	// Update Notification
+	I("newVersionUpdate").onclick = sw_update;
+	I("newVersionClose").onclick = function () { setDisplay("newVersionPanel", "none")};
 	
 }
 
