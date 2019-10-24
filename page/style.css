@@ -760,6 +760,9 @@ body {
 /* --------------------------- */
 
 .section.comments {}
+.vdCommentHeader {
+	height: 2em;
+}
 .vdCommentList {}
 .cmContainer {
 	position: relative;
