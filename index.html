@@ -336,7 +336,7 @@ See https://github.com/Seneral/FlagPlayer for details
 
 	</div>
 
-	<div class="fullscreenPanel popupPanel" id="settingsPanel">
+	<div class="fullscreenPanel" id="settingsPanel" style="display: none;">
 
 		<div class="settingsPanel">
 
@@ -417,6 +417,14 @@ See https://github.com/Seneral/FlagPlayer for details
 			</div>
 			
 		</div>
+	</div>
+
+	<div class="notificationPanel" id="newVersionPanel" style="display: none;">
+		<div> A new version is available! <button id="newVersionUpdate">Update now</button> </div>
+		<div class="flexSpace"></div>
+		<button class="notificationDismiss icon" id="newVersionClose">
+			<svg viewBox="6 6 36 36"><use href="#svg_cross"/></svg>
+		</button>
 	</div>
 
 	<!-- SVG ICONS -->
