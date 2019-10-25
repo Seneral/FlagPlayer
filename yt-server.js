@@ -1,6 +1,6 @@
 var checkRateLimit = require('./lib/rate-limit')('50 5');
 
-originWhitelist = [ 'https://flagplayer.seneral.dev' ];
+originWhitelist = [ 'https://flagplayer.seneral.dev', 'https://seneral.dev' ];
 if (process.env.HEROKU_LOCAL) // Only specified in local .env file
     originWhitelist.push('null'); // Allow local copies to access local heroku server
 
