@@ -640,6 +640,7 @@ body {
 }
 .playlist .liElement {
 	height: 54px;
+	margin: 6px 0;
 }
 .playlist .liThumbnail {
 	width: 96px;
@@ -1350,6 +1351,7 @@ button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 .tabBar {
 	display: flex;
 	flex-direction: row;
+	flex-wrap: wrap;
 	margin-bottom: 1em;
 }
 .mobile .tabBar {
