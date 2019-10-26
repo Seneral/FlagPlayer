@@ -2549,7 +2549,7 @@ function ui_addComments (container, comments, startIndex, finished) {
 	// Separate read and writes to prevent excessive cache trashing
 	var commentHeights = [];
 	for(var i = startIndex; i < comments.length; i++)
-		commentHeights[i] = container.children[i].offsetHeight;
+		commentHeights[i] = ui_hasDescendedClass(container.children[i], "collapsable").offsetHeight;
 	for(var i = startIndex; i < comments.length; i++)
 		ui_setupCollapsableText(container.children[i].lastElementChild, 5, commentHeights[i]);
 	// Move loader
