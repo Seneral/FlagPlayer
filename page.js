@@ -263,6 +263,8 @@ function sw_install () {
 				}
 				else update();
 			};
+			if (registration.waiting) // Trigger after initial detection
+				registration.onupdatefound();
 		}, function(e) {
 			console.warn("Failed to install service worker: Caching and Offline Mode will be unavailable!");
 		});
