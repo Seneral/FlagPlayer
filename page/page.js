@@ -2686,6 +2686,7 @@ function ui_resetChannelUploads () {
 /* -------------------- */
 
 function ui_setupPlaylist () {
+	ui_plScrollPos = 0;
 	I("plTitle").innerText = "";
 	I("plDetail").innerText = "";
 	sec_playlist.style.display = "block";
