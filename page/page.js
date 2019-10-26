@@ -3371,8 +3371,11 @@ function onMouseClick (mouse) {
 	ui_updateControlBar(mouse);
 
 	// Handle In-Page Navigation
-	if (mouse.target && mouse.target.hasAttribute("navigation")) {
-		var match = mouse.target.getAttribute("navigation").match(/^(.*?)=(.*)$/);
+	if (mouse.target && (mouse.target.hasAttribute("navigation") || mouse.target.hasAttribute("nav"))) {
+		var nav = mouse.target;
+		while (!nav.hasAttribute("navigation"))
+			nav = nav.parentElement;
+		var match = nav.getAttribute("navigation").match(/^(.*?)=(.*)$/);
 		if (match) {
 			switch (match[1]) {
 				case "v":  ct_navVideo(match[2]); break;
