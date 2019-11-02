@@ -919,6 +919,7 @@ body {
 	word-break: break-word;
 }
 .chProfileImg {
+	flex-shrink: 0;
 	height: 64px;
 	width: 64px;
 }
