@@ -191,6 +191,7 @@ var yt_channel; // meta {}, upload {}
 
 /* TEMPORARY STATE */
 var yt_playlistLoaded; // Event triggered when playlist is fully loaded
+var ct_online; // Flag if last request suceeded
 var ct_isAdvancedCorsHost; // Boolean: Supports cookie-passing for (with others) comments
 var ct_traversedHistory; // Prevent messing with history when traversing
 var ct_timerAutoplay; // Timer ID for video end autoplay timer
@@ -212,6 +213,7 @@ var md_attemptPause; // Flag to indicate play start attempt is to be aborted
 const BASE_URL = location.protocol + '//' + location.host + location.pathname;
 const LANG_INTERFACE = "en;q=0.9";
 const LANG_CONTENT = "en;q=0.9"; // content language (auto-translate) - * should remove translation
+const VIRT_CACHE = "https://flagplayer.seneral.dev/caches/vd-"; // Virtual adress used for caching. Doesn't actually exist, but needs to be https
 const HOST_YT = "https://www.youtube.com";
 const HOST_YT_MOBILE = "https://m.youtube.com";
 const HOST_YT_IMG = "https://i.ytimg.com/vi/"; // https://i.ytimg.com/vi/ or https://img.youtube.com/vi/
@@ -407,7 +409,7 @@ function ct_updatePageState () { // Update page with new information
 	if (ct_page == Page.Home)
 		state.title = "Home | FlagPlayer";
 
-	if (ct_page == Page.Media)  {
+	if (ct_page == Page.Media) {
 		if (yt_video && yt_video.loaded) state.title = yt_video.meta.title + " | FlagPlayer";
 		else if (!state.title) state.title = "Loading | FlagPlayer";
 		url.searchParams.set("v", yt_videoID);
@@ -651,14 +653,20 @@ function ct_resetChannel () {
 function ct_nextVideo() {
 	var newVideo;
 	if (yt_playlist) {
+		var playlist = yt_playlist.videos;
+		if (!ct_online) // Only cached available
+			playlist = yt_playlist.videos.filter (v => v.cachedURL != undefined);
 		var index;
-		if (ct_pref.playlistRandom) index = Math.floor (Math.random() * yt_playlist.videos.length);
+		if (playlist.length == 0) index = -1;
+		else if (ct_pref.playlistRandom) index = Math.floor (Math.random() * playlist.length);
 		else index = ct_getVideoPlIndex() + 1;
-		newVideo = yt_playlist.videos[index];
-	} else if (yt_video && yt_video.related) {
+		newVideo = playlist[index];
+	}
+	else if (yt_video && yt_video.related && ct_online) {
 		newVideo = yt_video.related.videos[0];
 	}
 	if (newVideo) ct_navVideo(newVideo.videoID);
+	else ui_updatePlayerState();
 }
 function ct_navVideo(videoID) {
 	ct_beforeNav();
@@ -670,16 +678,38 @@ function ct_canPlay () {
 }
 function ct_loadMedia () {
 	var loadingID = yt_videoID;
+	// Load and display cached data
+	var cacheLoad = db_getVideo(yt_videoID).then(function (video) {
+		if (!yt_video || loadingID != yt_videoID) return;
+		yt_video.cached = true;
+		yt_video.cachedURL = video.cachedURL;
+		if (yt_video.meta != undefined) return;
+		yt_video.meta = {
+			title: video.title,
+			uploader: {
+				name: video.uploader.name,
+				channelID: video.uploader.channelID,
+			},
+			uploadedDate: video.uploadedDate,
+			thumbnailURL: video.thumbnailURL,
+			length: video.length,
+			views: video.views,
+			likes: video.likes,
+			dislikes: video.dislikes,
+		};
+		ui_setVideoMetadata();
+	});
 	// Load, parse and display online video data
 	yt_loadVideoData(yt_videoID, false)
 	// Initiate further control
 	.then(function() {
+		ct_online = true;
 		if (yt_video.blocked)
-			throw new MDError(11, "Video is blocked in your country!", true);
+			throw new MDError(11, "Video is blocked in your country!", false);
 		if (yt_video.ageRestricted) 
-			throw new MDError(12, "Video is age restricted!", true);
+			throw new MDError(12, "Video is age restricted!", false);
 		if (yt_video.status != "OK") 
-			throw new MDError(13, "Playability Status: " + yt_video.status, true);
+			throw new MDError(13, "Playability Status: " + yt_video.status, false);
 		console.log("YT Video:", yt_video);
 
 		ct_mediaLoaded();
@@ -699,15 +729,32 @@ function ct_loadMedia () {
 	.catch(function(error) {
 		if (!error) return; // Silent fail when request has gone stale (new page loaded before this finished)
 		if ((error.name == "TypeError" && error.message.includes("fetch")) || error instanceof NetworkError) {
-			console.error("Offline!");
+			var useCache = function () {
+				console.log("Offline - Cache Fallback!");
+				yt_video.streams = [];
+				ct_mediaLoaded();
+			};
+			var skipVideo = function () {
+				ct_online = false;
+				ct_mediaError(new MDError(14, "Offline", false));
+			};
+			if (yt_video.cached) {
+				if (yt_video.cachedURL != undefined) useCache();
+				else skipVideo();
+			} else {
+				cacheLoad.then(function () {
+					if (yt_video.cachedURL != undefined) useCache();
+					else skipVideo();
+				}).catch (skipVideo);
+			}
 		}
 		else {
-			if (yt_video.meta) {
-				ui_setVideoMetadata();
-				ct_updatePageState();
-			}
 			ct_mediaError(error);
-			ct_mediaLoaded();
+			if (error instanceof MDError) { // Loaded metadata but not ready (streams unavailable)
+				ct_mediaLoaded();
+				ct_updatePageState();
+				ui_setVideoMetadata();
+			}
 		}
 	});
 
@@ -731,15 +778,15 @@ function ct_mediaLoad () {
 function ct_mediaLoaded () {
 	yt_video.loaded = true;
 	if (ct_state != State.Error) {
+		yt_video.ready = true;
 		ui_setStreams();
 		if (ct_paused) ct_state = State.PreStart;
 		else ct_state = State.Loading; // Stay in Loading until video actually starts
 		ct_totalTime = yt_video.meta.length;
-		ct_curTime = yt_parseNum(new URL(window.location.href).searchParams.get("t"));
+		ct_curTime = parseInt(new URL(window.location.href).searchParams.get("t")) || 0;
 		ui_updateTimelineProgress();
 		md_updateStreams(); // Fires ct_mediaReady or ct_mediaError eventually
 	}
-	ui_updatePlayerState();
 }
 function ct_mediaReady () {
 	ct_flags.buffering = false;
@@ -750,12 +797,25 @@ function ct_mediaReady () {
 	ui_updatePlayerState();
 }
 function ct_mediaError (error) {
-	if (error instanceof MDError && error.code == 4) {
+	clearTimeout(md_timerCheckBuffering);
+	if (error instanceof MDError && error.tag && error.tag.src.startsWith(VIRT_CACHE)) {
+		console.error("Cached media file erroneous! Removing from cache. ", error);
+		db_deleteCachedStream(yt_videoID).then (function () {
+			if (ct_online) { // Load source
+				md_updateStreams();
+				ui_updateStreamState();
+			}
+			else { // Next cached video
+				ct_startAutoplay(8);
+			}
+		});
+		error.minor = true; // assume minor
+	}
+	else if (error instanceof MDError && error.code == 4) {
 		console.error("Can't play selected stream!");
-		var stream = yt_video.streams.find(s => s.url == error.target.src);
-		if (stream) unavailable = true;
+		var stream = yt_video.streams.find(s => s.url == error.tag.src);
+		if (stream) stream.unavailable = true;
 		md_updateStreams();
-		ui_updateStreamState();
 		return;
 	}
 	md_resetStreams();
@@ -766,7 +826,7 @@ function ct_mediaError (error) {
 	ui_updatePlayerState();
 
 	if (error instanceof MDError && !error.minor)
-		ct_startAutoplay();
+		ct_startAutoplay(8);
 
 	console.error(error.message + " (" + error.name + (error.code? " " + error.code : "") + ")" + (error.tagname? " in " + error.tagname : ""));
 }
@@ -829,9 +889,12 @@ function ct_mediaPlayPause (value, indirect) {
 			if (indirect) ui_indicatePause();
 		} else {
 			if (ct_state == State.Ended) ct_curTime = 0;
-			if (ct_state == State.Error) md_updateStreams();
-			else md_checkStartMedia();
 			ct_state = State.Started;
+			md_updateStreams();
+			if (ct_state == State.Error) {
+				ct_stopAutoplay();
+				return;
+			}
 			if (indirect) ui_indicatePlay();
 		}
 	}
@@ -850,17 +913,20 @@ function ct_endSeeking () {
 	ct_flags.seeking = false;
 	md_checkBuffering ();
 }
-function ct_startAutoplay () {
-	if (yt_playlist) { // Silent 1s, can still be interruped by seeking
-		clearTimeout(ct_timerAutoplay);
-		ct_timerAutoplay = setTimeout (ct_nextVideo, 1000);
-	} else if (ct_pref.autoplay) {
-		clearTimeout(ct_timerAutoplay);
-		ct_timerAutoplay = setTimeout (ct_nextVideo, 8000);
-		setDisplay("nextLoadIndicator", "block"); // Hardcoded to 8s
+function ct_startAutoplay (timeout) {
+	clearTimeout(ct_timerAutoplay);
+	if (timeout == undefined) {
+		if (yt_playlist) timeout = 1;
+		else if (ct_pref.autoplay) timeout = 8;
+	}
+	if (timeout != undefined) {
+		ct_timerAutoplay = setTimeout (ct_nextVideo, timeout * 1000);
+		if (timeout == 8) // Hardcoded to 8s
+			setDisplay("nextLoadIndicator", "block");
 	}
 }
 function ct_stopAutoplay () {
+	setDisplay("nextLoadIndicator", "none");
 	clearTimeout(ct_timerAutoplay);
 }
 
@@ -1040,7 +1106,88 @@ function db_loadPlaylist (callback) {
 		};
 	});	
 }
+function db_getVideo (videoID) {
+	return db_access().then(function () {
+		return new Promise(function(resolve, reject) {
+			var transaction = db_database.transaction("videos", "readonly")
+			.objectStore("videos").get(videoID)
+			transaction.onsuccess = function (e) {
+				if (e.target.result)
+					resolve(e.target.result);
+				else reject();
+			};
+			transaction.onerror = reject;
+		});
+	});	
+}
  
+/* ------------------------------------------------- */
+/* ------ Stream Caching --------------------------- */
+/* ------------------------------------------------- */
+
+function db_cacheStream () {
+	if (!yt_video.ready) return Promise.reject();
+	if (!ct_sources || !ct_sources.audio) return Promise.reject();
+	if (!("serviceWorker" in navigator) || !sw_current) {
+		console.error("Service Worker required in order to cache videos!");
+		return Promise.reject();
+	}
+
+	var cacheID = yt_video.videoID;
+	var cacheURL = VIRT_CACHE + yt_video.videoID;
+	var streamURL = ct_sources.audio;
+
+	return window.caches.open("flagplayer-media")
+	.then (function (cache) {
+		return fetch(ct_pref.corsAPIHost + streamURL, { headers: { "range": "bytes=0-" } })
+		.then(function(response) {
+			if (!response.ok)
+				return Promise.reject(new NetworkError ("Failed to cache - response " + response.statusText));
+			console.log("Downloaded video stream! Size: " + ui_shortenNumber(response.headers.get("content-length")) + "B");
+			
+			// Add to cache
+			var cacheWrite = cache.put(cacheURL, new Response(response.body, {
+				status: 200,
+				headers: {
+					"content-length": response.headers.get("content-length"),
+					"content-type": response.headers.get("content-type"),
+				},
+			}));
+
+			// Add to database
+			var databaseWrite = db_access().then(function () {
+				var dbVideos = db_database.transaction("videos", "readwrite").objectStore("videos");
+				return new Promise (function (resolve, reject) {
+					dbVideos.get(cacheID).onsuccess = function (e) {
+						e.target.result.cachedURL = cacheURL;
+						dbVideos.put(e.target.result).onsuccess = resolve;
+					};
+				});
+			});
+
+			return Promise.all([cacheWrite, databaseWrite]);
+		});
+	});
+}
+
+function db_deleteCachedStream (cacheID) {
+	return window.caches.open("flagplayer-media")
+	.then (function (cache) {
+		var cacheWrite = cache.delete(VIRT_CACHE + cacheID);
+		var databaseWrite = db_access().then(function () {
+			var dbVideos = db_database.transaction("videos", "readwrite").objectStore("videos");
+			return new Promise (function (resolve, reject) {
+				dbVideos.get(cacheID).onsuccess = function (e) {
+					e.target.result.cachedURL = undefined;
+					if (yt_video.videoID == cacheID) yt_video.cachedURL = undefined;
+					dbVideos.put(e.target.result).onsuccess = resolve;
+				};
+			});
+		});
+		return Promise.all([cacheWrite, databaseWrite]);
+	});
+}
+
 //endregion
 
 /* -------------------------------------------------------------------------------------------------------------- */
@@ -1689,6 +1836,9 @@ function yt_loadVideoData(id, background) {
 			.then (function (streams) {
 				video.streams = streams;
 				return page;
+			}).catch (function () {
+				video.streams = [];
+				return page;
 			});
 			
 		} else {
@@ -1974,14 +2124,13 @@ function yt_loadMoreComments (pagedContent) {
 		} catch (e) { console.error("Failed to get comment data!", e, { commentData: commentData }); return; }		
 		if (isReplyRequest || !yt_page.isDesktop) yt_video.comments.lastPage = yt_video.comments.lastPage[1];
 		yt_updateNavigation(yt_video.comments.lastPage);
-		var response = yt_video.comments.lastPage.response;
-		if (!response.continuationContents)
-			pagedContent.data.conToken = undefined;
+
 		// Extract comments
 		var comments = pagedContent.data.comments || pagedContent.data.replies;
 		var lastCommentCount = comments.length;
-		yt_extractVideoCommentObject(pagedContent.data, comments, response);
+		yt_extractVideoCommentObject(pagedContent.data, comments, yt_video.comments.lastPage.response);
 		ui_addComments(pagedContent.container, comments, lastCommentCount, pagedContent.data.conToken == undefined);
+
 		// Finish
 		console.log("YT Comments:", pagedContent.data);
 		pagedContent.triggerDistance = 500; // Increase after first load
@@ -2314,11 +2463,12 @@ function ui_updateStreamState (selectedStreams) {
 			(isNaN(parseInt(ct_pref.dashAudio))? ct_pref.dashAudio: selectedStreams.dashAudio.aBR);
 		I("select_legacy").value = !selectedStreams.dashAudio? "NONE" : 
 			(isNaN(parseInt(ct_pref.legacyVideo))? ct_pref.legacyVideo : selectedStreams.legacyVideo.vResY);
-	} else if (yt_video && yt_video.loaded) {
+	} else if (yt_video && yt_video.ready) {
 		// Triggered by changes to selectableStreams (streams were deemed unavailable)
 		var dropdown = I("select_dashVideo");
 		[].forEach.call(dropdown.options, o => {
-			if (!isNaN(parseInt(o.value)) && yt_video.streams.findIndex(s => s.isDash && s.hasVideo && !s.unavailable && s.vResY*100+s.vFPS == o.value) == -1)
+			if (!isNaN(parseInt(o.value)) && !o.label.endsWith("!") && 
+				yt_video.streams.findIndex(s => s.isDash && s.hasVideo && !s.unavailable && s.vResY*100+s.vFPS == o.value) == -1)
 				o.label += " !";
 		});
 	}
@@ -2536,8 +2686,8 @@ function ui_resetStreams () {
 /* -------------------- */
 
 function ui_setVideoMetadata() {
+	if (!yt_video.cached && !yt_video.loaded) return;
 	sec_video.style.display = "block";
-	sec_comments.style.display = "block";
 	I("vdTitle").innerText = yt_video.meta.title;
 	I("vdViews").innerText = ui_formatNumber(yt_video.meta.views) + " views";
 	if (yt_video.meta.likes != undefined) {
@@ -2555,25 +2705,39 @@ function ui_setVideoMetadata() {
 		link.setAttribute("navigation", uploaderNav);
 		link.href = ct_getNavLink(uploaderNav);
 	});
-	I("vdUploaderImg").src = yt_video.meta.uploader.profileImg;
 	I("vdUploaderName").innerText = yt_video.meta.uploader.name;
-	I("vdUploaderSubscribers").innerText = "SUBSCRIBE " + (ct_isDesktop? ui_formatNumber(yt_video.meta.uploader.subscribers) : ui_shortenNumber(yt_video.meta.uploader.subscribers));
 	I("vdUploadDate").innerText = "Uploaded on " + ui_formatDate(yt_video.meta.uploadedDate);
-	I("vdDescription").innerHTML = ui_formatText(yt_video.meta.description);
+	if (yt_video.loaded) {
+		var uploaderImg = I("vdUploaderImg");
+		uploaderImg.src = yt_video.meta.uploader.profileImg;
+		uploaderImg.parentElement.style.display = "";
+		I("vdUploaderSubscribers").innerText = "SUBSCRIBE " + (ct_isDesktop? ui_formatNumber(yt_video.meta.uploader.subscribers) : ui_shortenNumber(yt_video.meta.uploader.subscribers));
+		I("vdDescription").innerHTML = ui_formatText(yt_video.meta.description);
+		setDisplay("vdTextContainer", "");
 
-	var container = I("vdMetadata");
-	yt_video.meta.metadata.forEach(m => {
-		container.insertAdjacentHTML("beforeEnd", "<span>" + m.name + ":</span>");
-		container.insertAdjacentHTML("beforeEnd", "<span>" + m.data + "</span>");
-	});
-	if (yt_video.meta.credits) {
-		yt_video.meta.credits.forEach(m => {
+		var container = I("vdMetadata");
+		yt_video.meta.metadata.forEach(m => {
 			container.insertAdjacentHTML("beforeEnd", "<span>" + m.name + ":</span>");
 			container.insertAdjacentHTML("beforeEnd", "<span>" + m.data + "</span>");
 		});
+		if (yt_video.meta.credits) {
+			yt_video.meta.credits.forEach(m => {
+				container.insertAdjacentHTML("beforeEnd", "<span>" + m.name + ":</span>");
+				container.insertAdjacentHTML("beforeEnd", "<span>" + m.data + "</span>");
+			});
+		}
+	
+		ui_setupCollapsableText(I("vdTextContainer"), 8);
+	}
+	else {
+		I("vdUploaderImg").parentElement.style.display = "none";
+		setDisplay("vdUploaderSubscribers", "none");
+		setDisplay("vdTextContainer", "none");
 	}
 
-	ui_setupCollapsableText(I("vdTextContainer"), 8);
+	if (yt_video.loaded && ct_pref.loadComments)
+		sec_comments.style.display = "block";
+	
 }
 function ui_resetVideoMetadata () {
 	sec_video.style.display = "none";
@@ -3417,8 +3581,9 @@ function onSelectStreams () {
 }
 function onSelectContextAction (selectedValue, dropdownElement, selectedElement) {
 	var selectedValue = selectedValue || "";
-	if (selectedValue == "top") yt_loadTopComments ();
-	else if (selectedValue == "new") yt_loadNewComments ();
+	if (selectedValue == "top") yt_loadTopComments();
+	else if (selectedValue == "new") yt_loadNewComments();
+	else if (selectedValue == "cache") db_cacheStream().catch(function(){});
 }
 function onLoadReplies (container, commentID) {
 	var comment = yt_video.comments.comments.find(c => c.id == commentID);
@@ -3629,11 +3794,11 @@ function onKeyUp (keyEvent) {
 /* -------------------- */
 
 function onMediaAbort () {
-	ct_mediaError(new MDError(10, this.tagName + " aborted!", true, this.tagName));
+	ct_mediaError(new MDError(10, this.tagName + " aborted!", true, this));
 }
-function onMediaError (error) {
-	if (!error.target || error.target.error.message != "MEDIA_ELEMENT_ERROR: Empty src attribute")  {
-		ct_mediaError(new MDError(error.code, error.message), true, error.target.tagName);
+function onMediaError (event) {
+	if (event.target.error.message != "MEDIA_ELEMENT_ERROR: Empty src attribute")  {
+		ct_mediaError(new MDError(event.target.error.code, event.target.error.message, true, event.target));
 	}
 }
 function onMediaStalled () {
@@ -3690,7 +3855,7 @@ function md_daVal (s) { return s.aBR; }
 function md_lvVal (s) { return s.vResY; }
 
 function md_selectableStreams () {
-	if (!yt_video || !yt_video.loaded) return undefined;
+	if (!yt_video || !yt_video.ready) return undefined;
 	// Return streams available in each category sorted from best to worst
 	var streams = {};
 	streams.dashVideo = yt_video.streams
@@ -3705,7 +3870,7 @@ function md_selectableStreams () {
 	return streams;
 }
 function md_selectStreams () {
-	if (!yt_video || !yt_video.loaded) return undefined;
+	if (!yt_video || !yt_video.ready) return undefined;
 	// Return the selected stream in each category according to preferences
 	var select = function (s, pref, value, sec) { // SECondary selector, f.E. container
 		if (pref == "NONE" || s.length == 0) return undefined;
@@ -3724,7 +3889,7 @@ function md_selectStreams () {
 	return streams;
 }
 function md_updateStreams ()  {
-	if (!yt_video || !yt_video.loaded) {
+	if (!yt_video || !yt_video.ready) {
 		ct_sources = undefined;
 		return;
 	}
@@ -3738,16 +3903,21 @@ function md_updateStreams ()  {
 	ct_sources = {};
 	if (ct_pref.dash) {
 		ct_sources.video = selectedStreams.dashVideo? selectedStreams.dashVideo.url : '';
-		ct_sources.audio = selectedStreams.dashAudio? selectedStreams.dashAudio.url : '';
+		ct_sources.audio = yt_video.cachedURL? yt_video.cachedURL : (selectedStreams.dashAudio? selectedStreams.dashAudio.url : '');
 	} else {
 		ct_sources.video = selectedStreams.legacyVideo? selectedStreams.legacyVideo.url : '';
 		ct_sources.audio = '';
+	}
+	if (!ct_sources.video && !ct_sources.audio) {
+		ct_mediaError(new MDError(15, "No media sources available!", false));
+		return;
 	}
 	ui_updateStreamState(selectedStreams);
 	// Trigger reload
 	if ((videoMedia.src != ct_sources.video && ct_sources.video) || (audioMedia.src != ct_sources.audio && ct_sources.audio)) {
 		// One stream will need buffering after change
 		videoMedia.pause(); audioMedia.pause();
+		ui_updateTimelineBuffered();
 	}
 	if (videoMedia.src != ct_sources.video) loadStream(videoMedia, ct_sources.video);
 	if (audioMedia.src != ct_sources.audio) loadStream(audioMedia, ct_sources.audio);
@@ -3823,7 +3993,7 @@ function md_checkBuffering(forceBuffer) {
 	if (md_attemptPlayStarted) return;
 	if (!ct_sources) return;
 	if (!ct_sources.video && !ct_sources.audio) {
-		console.error("Sources not yet loaded");
+		ct_mediaError(new MDError(15, "No media sources available!", false));
 		return;
 	}
 	if (ct_paused || ct_flags.buffering) { // Assure times are synced
@@ -3917,16 +4087,16 @@ function md_forceStartMedia() {
 		audioMedia.pause();
 	}, 500);
 	var attemptFinally = function() {
+		md_attemptPlayStarted = false;
 		if (timeout) {
 			ct_curTime = time;
+			md_pause();
 			if (!md_attemptPause)
 				setTimeout(md_checkStartMedia, 500);
 			md_attemptPause = false;
-			md_attemptPlayStarted = false;
 			return;
 		} // Leftover promise call after timeout
 		clearTimeout(attemptTimeout);
-		md_attemptPlayStarted = false;
 		if (md_attemptPause) {
 			md_pause();
 			md_attemptPause = false;
@@ -3942,7 +4112,7 @@ function md_forceStartMedia() {
 			} else if (!attemptError instanceof DOMException) {
 				console.error("--- Failed to start media playback!");
 				ct_mediaError(attemptError);
-				setTimeout(md_checkStartMedia, 500);
+				setTimeout(md_checkStartMedia, 1000);
 			} else if (!attemptAborted) {
 				setTimeout(md_checkStartMedia, 500);
 			}
@@ -3970,19 +4140,17 @@ function md_forceStartMedia() {
 }
 function md_assureBuffer () {
 	clearTimeout(md_timerCheckBuffering);
-	bufferedAhead = md_getBufferedAhead();
+	var bufferedAhead = md_getBufferedAhead();
 	md_timerCheckBuffering = setTimeout(function () {
-		if (ct_state == State.Started && !ct_flags.buffering) {
-			//console.log(bufferedAhead*1000 + "ms in the future: " + md_getBufferedAhead()*1000);
+		if (ct_state == State.Started && !ct_flags.buffering)
 			md_checkBuffering();
-		}
 	}, (bufferedAhead-1)*1000);
 }
 function md_assureSync () {
 	clearTimeout(md_timerSyncMedia);
 	if (ct_sources && ct_sources.video && ct_sources.audio && !md_attemptPlayStarted) {
 		var syncTimes = function (syncSignificance) {
-			if (ct_sources && ct_sources.video && ct_sources.audio) {
+			if (ct_sources && ct_sources.video && ct_sources.audio && !md_attemptPlayStarted) {
 				if (ct_isPlaying()) {
 					var timeDiff = audioMedia.currentTime-videoMedia.currentTime;
 					var timeDiffLabel = (timeDiff*1000-(timeDiff*1000)%1) + "ms";
@@ -3991,7 +4159,10 @@ function md_assureSync () {
 						console.info("MD: Sync Error: " + timeDiffLabel + " - Fixing!");
 						md_checkBuffering(); // Incase video was hidden (diff multiple seconds), video might not have been buffered
 						if (!ct_flags.buffering) md_timerSyncMedia = setTimeout(() => syncTimes(syncSignificance + 0.05), 1000*(syncSignificance + 0.1));
-					} else console.info("MD: Sync Error: " + timeDiffLabel + "!");
+					} else { // Setup regular sync checks based on buffering to reduce risk of late sync of several seconds into unbuffered areas
+						//console.info("MD: Sync Error: " + timeDiffLabel + "!");
+						md_timerSyncMedia = setTimeout(() => syncTimes(0.05), Math.max(5000, Math.min(md_getBufferedAhead()*1000/2, 30000)));
+					}
 				} else {
 					videoMedia.currentTime = ct_curTime;
 					audioMedia.currentTime = ct_curTime;
@@ -4011,10 +4182,29 @@ function md_assureSync () {
 
 //region
 
-
-/* -------------------- */
-/* ---- REQUESTS ------ */
-/* -------------------- */
+class ParseError extends Error {
+	constructor (message, code, object) {
+		super (message);
+		this.name = "ParseError";
+		this.code = code;
+		this.object = object;
+	}
+}
+class MDError extends Error {
+	constructor (code, message, minor, tag) {
+		super(message);
+		this.code = code;
+		this.minor = minor;
+		this.tag = tag;
+	}
+}
+class NetworkError extends Error {
+	constructor (response) {
+		super(response.statusText);
+		this.name = "NetworkError";
+		this.code = response.status;
+	}
+}
 
 // Just a wrapper to facilitate paged requests
 function PAGED_REQUEST (pagedContent, method, url, authenticate, callback, supressLoader) {
@@ -4082,31 +4272,6 @@ function ex_interpretMetadata() {
 		} catch(e) { console.warn("Experimental metadata detection failed!"); }
 	}
 }
-
-class ParseError extends Error {
-	constructor (message, code, object) {
-		self.name = "ParseError";
-		super (message);
-		self.code = code;
-		self.object = object;
-	}
-}
-class MDError extends Error {
-	constructor (code, message, minor, tagname) {
-		super(message);
-		self.code = code;
-		self.minor = minor;
-		self.tagname = tagname;
-	}
-}
-class NetworkError extends Error {
-	constructor (response) {
-		self.name = "NetworkError";
-		super(response.statusText);
-		self.code = response.status;
-	}
-}
-
 
 /* -------------------- */
 /* ---- HTML BIN ------ */
@@ -4254,14 +4419,9 @@ function ht_appendCommentElement (container, commentID, authorNav, authorIMG, au
 	return container.lastElementChild;
 }
 
-//endregion
-
-
-/* -------------------------------------------------------------------------------------------------------------- */
-/* ----------------- DATA --------------------------------------------------------------------------------------- */
-/* -------------------------------------------------------------------------------------------------------------- */
-
-//region
+/* -------------------- */
+/* ---- DATA ---------- */
+/* -------------------- */
 
 var ITAGS = {
 // LEGACY Streams
