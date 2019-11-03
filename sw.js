@@ -1,5 +1,8 @@
-var VERSION = 4;
-var CACHE_NAME = "flagplayer-cache-1";
+var VERSION = 1;
+var APP_CACHE = "flagplayer-cache-1";
+var IMG_CACHE = "flagplayer-thumbs";
+var MEDIA_CACHE = "flagplayer-media";
+var VIRT_CACHE = "https://flagplayer.seneral.dev/caches/vd-"; // Virtual adress used for caching. Doesn't actually exist, but needs to be https
 var BASE = location.href.substring(0, location.href.lastIndexOf("/"));
 var reMainPage = new RegExp(BASE.replace("/", "\\/") + "(|\\/|\\/index\\.html)(\\?.*)?$")
 var database;
@@ -45,7 +48,7 @@ function db_hasVideo(videoID) {
 
 self.addEventListener('install', function(event) {
 	event.waitUntil(
-		caches.open(CACHE_NAME)
+		caches.open(APP_CACHE)
 		.then(function(cache) {
 			return cache.addAll([
 				"./style.css",
@@ -60,7 +63,7 @@ self.addEventListener('activate', function(event) {
 		// Delete unused stuff (most likely not whole caches, but keys in caches)
 		caches.keys().then(keys => Promise.all(
 			keys.map(key => {
-				if (key.startsWith("flagplayer-cache-") && key != CACHE_NAME)
+				if (key.startsWith("flagplayer-cache-") && key != APP_CACHE)
 					return caches.delete(key);
 			})
 		))
@@ -73,8 +76,38 @@ self.addEventListener('message', function(event) {
 
 self.addEventListener('fetch', function(event) {
 	var url = event.request.url;
-	if (url.match(reMainPage)) // Always use cached app html
+	if (url.match(reMainPage)) { // Always use cached app html
 		event.respondWith(caches.match("./index.html"));
+	}
+	else if (url.includes(VIRT_CACHE)) { // Try to read from the media cache
+		var pos = Number(/^bytes\=(\d+)\-$/g.exec(event.request.headers.get('range'))[1]);
+		event.respondWith(
+			caches.open("flagplayer-media")
+			.then(function(cache) {
+				return cache.match(url);
+			}).then(function(cacheResponse) {
+				if (cacheResponse)
+					return cacheResponse;
+				return fetch(event.request).then(function(fetchResponse) {
+					return fetchResponse;
+				});
+			}).then(function(response) {
+				return response.arrayBuffer()
+				.then(function(byteData) {
+					return new Response(byteData.slice(pos), {
+						status: 206,
+						statusText: 'Partial Content',
+						headers: [
+							['Content-Type', response.headers.get("content-type") ],
+							['Content-Range', 'bytes ' + pos + '-' +
+								(byteData.byteLength - 1) + '/' + byteData.byteLength
+							]
+						]
+					});
+				})
+			})
+		);
+	}
 	else {
 		event.respondWith(
 			caches.match(event.request)
@@ -88,21 +121,19 @@ self.addEventListener('fetch', function(event) {
 					// Cache if desired
 					if (url.startsWith(BASE + "/favicon")) {
 						var cacheResponse = response.clone();
-						caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cacheResponse));
+						caches.open(APP_CACHE).then((cache) => cache.put(event.request, cacheResponse));
 					}
 					else {
-						var match = url.match(/https:\/\/i.ytimg.com\/vi\/([a-zA-Z0-9_-]{11})\/default\.jpg/);
-						if (match) {
+						var thumb = url.match(/https:\/\/i.ytimg.com\/vi\/([a-zA-Z0-9_-]{11})\/default\.jpg/);
+						if (thumb) {
 							var cacheResponse = response.clone();
-							db_hasVideo(match[1]).then(function() { // Video stored, cache thumbnail
-								caches.open(CACHE_NAME).then((cache) => cache.put(event.request, cacheResponse));
-							}).catch(function () {
-
-							});
+							db_hasVideo(thumb[1]).then(function() { // Video stored, cache thumbnail
+								caches.open(IMG_CACHE).then((cache) => cache.put(event.request, cacheResponse));
+							}).catch(function() {});
 						}
 					}
 					return response;
-				});
+				}).catch(function(error) {});
 			})
 		);
 	}
