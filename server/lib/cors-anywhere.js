@@ -1,4 +1,5 @@
 // © 2013 - 2016 Rob Wu <rob@robwu.nl>
+// Modified by Seneral <contact@seneral.dev>
 // Released under the MIT license
 
 'use strict';
@@ -141,7 +142,12 @@ function proxyRequest(req, res, proxy) {
   }
 
   // Start proxying the request
-  proxy.web(req, res, proxyOptions);
+  try {
+    proxy.web(req, res, proxyOptions);
+  } catch (err) {
+    proxy.emit('error', err, req, res);
+  }
+
 }
 
 /**
@@ -208,14 +214,12 @@ function onProxyResponse(proxy, proxyReq, proxyRes, req, res) {
     }
   }
 
-  // Strip cookies
-  //delete proxyRes.headers['set-cookie'];
-  //delete proxyRes.headers['set-cookie2'];
-
   withCORS(proxyRes.headers, req);
 
-  proxyRes.headers['reqHeaders'] = JSON.stringify(req.headers);
-  proxyRes.headers['access-control-expose-headers'] = (proxyRes.headers['access-control-expose-headers'] || "") + ",reqHeaders";
+  if (process.env.HEROKU_LOCAL) { // Debug only: Shows headers of the initial request from the client
+    proxyRes.headers['reqHeaders'] = JSON.stringify(req.headers);
+    proxyRes.headers['access-control-expose-headers'] = (proxyRes.headers['access-control-expose-headers'] || "") + ",reqHeaders";
+  }
 
   return true;
 }
