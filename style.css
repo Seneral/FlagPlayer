@@ -47,6 +47,11 @@ body {
 * {
 	box-sizing: border-box;
 }
+a, a:link, a:visited, a:hover, a:active {
+	color: inherit;
+	text-decoration: inherit;
+}
+
 
 /* -------------------------------------------------------------------- */
 /* ---- HEADER -------------------------------------------------------- */
@@ -200,19 +205,23 @@ body {
 .desktopLayout .column.main {
 	flex-grow: 1;
 	width: auto;
-	margin: 1em;
+	margin-right: 1em;
 }
 .desktopLayout .column.side { 
 	flex-grow: 0;
 	flex-shrink: 1;
 	max-width: 35%;
 	margin: 1em;
+	margin-top: 0em;
+	width: 30em; 
 }
 .desktopLayout .section.side { 
 	width: 30em; 
 	max-width: 100%;
 }
-.desktop .section.player {}
+.desktop .section.player {
+	margin-bottom: 1em;
+}
 .desktop .section.banner {}
 .desktop .section.channel {}
 .desktop .section.search {}
@@ -562,9 +571,6 @@ body {
 
 .playlistList, .videoList {
 }
-.playlistList *, .videoList * {
-	overflow: hidden;
-}
 .playlistList .liElement, .videoList .liElement {
 	height: 81px;
 }
@@ -649,6 +655,11 @@ body {
 .playlist .liIndex {
 	line-height: 54px;
 }
+
+
+/* --------------------------- */
+/* ---- CACHE ---------------- */
+/* --------------------------- */
 
 
 /* --------------------------- */
@@ -795,7 +806,7 @@ body {
 	width: 32px;
 }
 .cmAuthorName {
-	display: inline-block;
+	display: inline;
 	font-size: 110%;
 	font-weight: bolder;
 	padding-right: 0.5em;
@@ -832,11 +843,6 @@ body {
 /* --------------------------- */
 /* Standard Videolist */
 .section.search {}
-.scActionBar {
-	margin-bottom: 1em;
-	border-bottom: 1px solid var(--bg-acc-color);
-	height: 2em;
-}
 
 /* --------------------------- */
 /* ---- CHANNEL -------------- */
@@ -1073,21 +1079,28 @@ button {
 /* ---- NOTIFICATIONS -------- */
 /* --------------------------- */
 
-.notificationPanel {
+.notificationContainer {
 	z-index: 9;
 	position: fixed;
 	bottom: 0;
 	right: 0;
 	width: 100%;
 	display: flex;
+	flex-direction: column;
+}
+.notificationPanel {
+	display: flex;
 	line-height: 2em;
 	padding: 0.5em 1em;
 	background-color: var(--bg-sec-color);
 }
+.desktop .notificationContainer {
+	margin: 1em;
+}
 .desktop .notificationPanel {
+	margin-left: auto;
 	max-width: 40em;
 	max-width: fit-content;
-	margin: 1em;
 	border: 1px solid var(--bg-sec-acc-color);
 }
 .notificationDismiss {
@@ -1128,9 +1141,9 @@ button {
 		  -ms-user-select: text; /* Internet Explorer/Edge */
 			  user-select: text; /* Chrome and Opera */
 }
-a, a:link, a:visited, a:hover, a:active {
-	color: inherit;
-	text-decoration: inherit;
+a.freeLink {
+	font-weight: bolder;
+	color: var(--txt-sec-color);
 }
 
 
@@ -1161,6 +1174,10 @@ a, a:link, a:visited, a:hover, a:active {
 
 .collapsable .collapser, .contentLoader {
 	cursor: pointer;
+}
+.collapsable .collapser:focus, .contentLoader:focus {
+	cursor: pointer;
+	outline: -webkit-focus-ring-color auto 1px;
 }
 button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 	font-weight: bolder;
@@ -1296,6 +1313,11 @@ button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 .actionBar.right {
 	flex-direction: row-reverse;
 }
+.actionBar.headerBar {
+	margin-bottom: 1em;
+	border-bottom: 1px solid var(--bg-acc-color);
+	height: 2em;
+}
 .barAction {
 	display: inline-block;
 	height: 100%;
@@ -1303,11 +1325,13 @@ button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 .barAction span {
 	line-height: 1.5em;
 }
-.barLabel {
+.barLabel, .barText {
 	display: inline-block;
 	line-height: 2em;
 	color: var(--txt-sec-color);
 	padding: 0 0.5em;
+}
+.barLabel {
 	font-weight: bolder;
 }
 /* Variation: Context */
