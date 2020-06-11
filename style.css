@@ -1254,6 +1254,7 @@ button.contentLoader, span.contentLoader, button.collapser, span.collapser {
 .liDetail {
 	margin: 0 1em;
 	flex-grow: 1;
+	overflow: hidden;
 }
 .liDetail span {
 	display: block;
