@@ -3932,6 +3932,7 @@ function onKeyDown (keyEvent) {
 			onControlPrev();
 			break;
 		default:
+			pass = true;
 			break;
 		}	
 	} else if (keyEvent.ctrlKey) {
