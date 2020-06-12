@@ -2768,7 +2768,8 @@ function ui_openSettings () {
 	I("st_corsHost").value = ct_pref.corsAPIHost;
 	I("st_cache_quality").value = ct_pref.cacheAudioQuality;
 	I("st_cache_force").checked = ct_pref.cacheForceUse;
-	db_getCachedVideos().then(function() {
+	db_getCachedVideos().then(function(cachedVideos) {
+		db_cachedVideos = cachedVideos;
 		I("st_cache_usage").innerText = ui_shortenBytes(db_getCacheSize());
 	});
 }
