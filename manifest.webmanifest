@@ -26,7 +26,7 @@
       "type": "image/png"
     }
   ],
-  "theme_color": "rgb(204,0,0)",
+  "theme_color": "rgb(40,40,40)",
   "background_color": "rgb(40,40,40)",
   "categories": "music entertainment",
   "start_url": "/",
