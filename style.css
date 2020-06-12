@@ -47,7 +47,7 @@ body {
 * {
 	box-sizing: border-box;
 }
-a, a:link, a:visited, a:hover, a:active {
+a, a:visited, a:hover, a:active {
 	color: inherit;
 	text-decoration: inherit;
 }
@@ -1140,6 +1140,10 @@ button {
 		 -moz-user-select: text; /* Firefox */
 		  -ms-user-select: text; /* Internet Explorer/Edge */
 			  user-select: text; /* Chrome and Opera */
+}
+.freeHeader {
+	font-weight: bolder;
+	color: var(--txt-sec-color);
 }
 a.freeLink {
 	font-weight: bolder;
