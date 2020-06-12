@@ -130,17 +130,25 @@ See https://github.com/Seneral/FlagPlayer for details
 						<select id="select_dashAudio" class="selector rightControl"></select>
 					</div>
 					<div>
-						<span>Legacy Streams:</span>
+						<span>Loop:</span>
 						<label class="switch rightControl">
-							<input id="legacyStreamToggle" type="checkbox">
+							<input type="checkbox" id="opt_loop">
 							<span class="background"></span>
 							<span class="knob"></span>
 						</label>
 					</div>
 					<div>
-						<span>Loop:</span>
+						<span>Autoplay:</span>
 						<label class="switch rightControl">
-							<input id="loopToggle" type="checkbox">
+							<input type="checkbox" id="opt_autoplay">
+							<span class="background"></span>
+							<span class="knob"></span>
+						</label>
+					</div>
+					<div>
+						<span>Playlist Shuffle:</span>
+						<label class="switch rightControl">
+							<input type="checkbox" id="opt_plshuffle">
 							<span class="background"></span>
 							<span class="knob"></span>
 						</label>
@@ -210,35 +218,43 @@ See https://github.com/Seneral/FlagPlayer for details
 				
 				<!-- Home Content -->
 				<section class="section home" id="home">
-					
-					<div class="collapsable" collapsed>
-						<button class="collapser barAction" more-text="What is FlagPlayer?" less-text="Alright gotcha">
-							What is FlagPlayer?
-						</button>
-						<div class="selectable textContent collapsableContainer">
-							FlagPlayer is a music-oriented, single-page, client-side YouTube web app - and it is <a href="https://github.com/Seneral/FlagPlayer">open source</a>! </br>
-							Once accessed it resides in your browser cache and does not require an active internet connection to work, except of course to fetch the videos from YouTubes servers. You can search for videos, enter and save your YouTube playlists to access them offline at any point, and cache individual audio streams for offline playback. After caching, just go to your playlist and FlagPlayer will detect you are offline and automatically only play back your cached videos in that playlist, until you are online again. Even if you are online, it will use the cached audio if you have it. However, currently you can't play back only cached videos when you are online. For that, create a new playlist with only cached videos. </br>
-							There are a few convenient settings that are not available on YouTube, so go check them out on the top right. </br>
-							The player itself allows you to only listen to the audio stream if you want, in case you only want audio, and is otherwise more or less a standard player. It does not yet support subtitles and similar features, and it will stutter and go out of sync with the audio when playing back very high resolution videos. </br>
-							FlagPlayer does not use any official YouTube APIs and is thus completely legal to use. That does however mean it has to be constantly updated to not break. If you spot an error, please create an issue on the <a href="https://github.com/Seneral/FlagPlayer/issues">Github Page</a>.
-						</div>
+
+					<div class="playlistList" id="homePlaylists">
+						<br>
+						It seems you have not saved any playlists yet.</br>
+						You can enter YouTube playlists as links or IDs in the search bar.</br>
 					</div>
 					</br>
-					<a class="freeLink" href="?view=cache">Cached Audio Streams</a> </br>
-					</br>
-
-					<span>Saved Playlists:</span>
-					<div class="playlistList" id="homePlaylists"></div>
+					<div class="collapsable" collapsed>
+						<button class="collapser barAction" more-text="Introduction to FlagPlayer" less-text="Alright gotcha">Introduction to FlagPlayer</button>
+						</br></br>
+						<div class="selectable textContent collapsableContainer">
+							FlagPlayer is a music-oriented, single-page, client-side YouTube web app - and it is <a href="https://github.com/Seneral/FlagPlayer">open source</a>! </br>
+							You can search for videos, enter and save your YouTube playlists to access them offline at any point, and cache individual audio streams for offline playback.</br>
+							</br>
+							<span class="freeHeader">Web App?</span></br>
+							Once accessed FlagPlayer resides in your browser cache (less than 100KB) and does not require an active internet connection to work, except of course to fetch the videos from YouTubes servers. That means you can listen to cached audio even when completely offline. Additionally you can add FlagPlayer to your home screen and it will act like any other normal app. If you find that your playlists and cached audio streams dissappear from time to time, then the browser purged them. Adding FlagPlayer to the home screen might fix this as it indicates your intent to interact with the data you saved, making the browser less likely to delete it when you're running low on memory. </br>
+							</br>
+							<span class="freeHeader">Audio Caching</span></br>
+							You can find the option to cache an audio stream in the context menu of the video title bar. After caching, just go to your saved playlist and FlagPlayer will detect when you are offline and automatically only play back your cached audio in that playlist, until you are online again. Even if you are online, if you left "Cache First" in the settings enabled, it will use the cached audio without redownloading the stream. To view all cached streams and the storage usage, go to the settings and click on "Audio Cache". </br>
+							</br>
+							<span class="freeHeader">Features and issues</span></br>
+							The player itself allows you to only listen to the audio stream if you want, in case you only want audio, and is otherwise more or less a standard player. </br>
+							It does not yet support subtitles and similar features, and it will stutter and go out of sync with the audio when playing back very high resolution videos. </br>
+							FlagPlayer does not use any official YouTube APIs and is thus completely legal to use. </br>
+							That does however mean it has to be constantly updated to not break. If you spot an error, please <a href="https://github.com/Seneral/FlagPlayer/issues">create an issue</a>.
+						</div>
+					</div>
 				</section>
 				
 				<!-- Cache Content -->
 				<main class="section cache" id="cache">
 					<div class="actionBar headerBar">
-						<span class="barLabel">Cached Videos:</span>
+						<span class="barLabel">Cached Audio Streams:</span>
 						<span class="barText" id="cacheAmount">0</span>
 						<div class="flexSpace"></div>
-						<span class="barLabel">Estimated Usage:</span>
-						<span class="barText" id="cacheQuota">0MB / 0MB</span>
+						<span class="barLabel">Memory Usage:</span>
+						<span class="barText" id="cacheUsage">0B</span>
 					</div>
 					<div class="videoList" id="cacheVideoList"></div>
 				</main>
@@ -271,9 +287,9 @@ See https://github.com/Seneral/FlagPlayer for details
 								<div class="dropdownContent">
 									<a tabindex="0" class="youtubeLink" href="https://www.youtube.com" target="_blank">Watch on YouTube</a>
 									<span tabindex="0" value="cache">Cache Audio Stream</span>
-									<a tabindex="0" value="downloadAudio">Download Audio</a>
-									<a tabindex="0" value="downloadVideo">Download Video</a>
-									<a tabindex="0" value="thumbnailImgLink">Thumbnail</a>
+									<a tabindex="0" value="linkAudio">Audio Stream</a>
+									<a tabindex="0" value="linkVideo">Video Stream</a>
+									<a tabindex="0" value="linkThumbnail">Thumbnail</a>
 								</div>
 							</button>
 						</div>
@@ -390,42 +406,21 @@ See https://github.com/Seneral/FlagPlayer for details
 				</button>
 			</div>
 			<div class="settingsContent">
-				<div>
-					<span>Autoplay</span>
-					<label class="switch rightControl">
-						<input type="checkbox" id="st_autoplay">
-						<span class="background"></span>
-						<span class="knob"></span>
-					</label>
-				</div>
-				<div>
-					<span>Playlist Shuffle</span>
-					<label class="switch rightControl">
-						<input type="checkbox" id="st_plshuffle">
-						<span class="background"></span>
-						<span class="knob"></span>
-					</label>
-				</div>
-				<div>
-					<span>Search Filter</span>
-					<button class="script dropdown multiple crunched left down rightControl" id="st_filter_categories">
-						<span class="dropdownButton">0 filtered</span>
-						<div class="dropdownContent"></div>
-					</button>
-					<br>
-					<span>Hide Completely</span>
-					<label class="switch rightControl">
-						<input type="checkbox" id="st_filter_hide">
-						<span class="background"></span>
-						<span class="knob"></span>
-					</label>
-				</div>
+
 				<div>
 					<span>Theme</span>
 					<select class="selector rightControl" id="st_theme">
 						<option value="LIGHT">Light</option>
 						<option value="DARK">Dark</option>
 					</select>
+				</div>
+				<div>
+					<span>Small Player</span>
+					<label class="switch rightControl">
+						<input type="checkbox" id="st_small_player">
+						<span class="background"></span>
+						<span class="knob"></span>
+					</label>
 				</div>
 				<div>
 					<span>Related Videos</span>
@@ -443,12 +438,17 @@ See https://github.com/Seneral/FlagPlayer for details
 						<span class="knob"></span>
 					</label>
 				</div>
+
 				<div>
 					<span>CORS Host</span>
 					<input type="text" class="baseField rightControl" id="st_corsHost">
 				</div>
 
 				<div>
+					<a class="freeLink" href="?view=cache">Audio Cache</a>
+					<a class="freeLink rightControl" href="?view=cache">View All</a>
+					<a class="freeLink rightControl" href="?view=cache" id="st_cache_usage">0B</a>
+					</br>
 					<span>Cache Quality</span>
 					<select class="selector rightControl" id="st_cache_quality">
 						<option value="BEST">Best</option>
@@ -467,14 +467,6 @@ See https://github.com/Seneral/FlagPlayer for details
 					</label>
 				</div>
 
-				<div>
-					<span>Small Player</span>
-					<label class="switch rightControl">
-						<input type="checkbox" id="st_small_player">
-						<span class="background"></span>
-						<span class="knob"></span>
-					</label>
-				</div>
 			</div>
 			<div class="settingsHeader">
 				<span>About</span>

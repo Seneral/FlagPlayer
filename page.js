@@ -311,11 +311,11 @@ function ct_init () {
 function ct_loadPreferences () {
 	// Playback options
 	md_pref = {};
-	md_pref.dash = G("prefDash") == "false"? false : true;
+	md_pref.dash = true;//G("prefDash") == "false"? false : true;
 	md_pref.legacyVideo = G("prefLegacyVideo") || "BEST"; // NONE - BEST - WORST - <Resolution>
 	md_pref.dashVideo = G("prefDashVideo") || "72030"; // NONE - BEST - WORST - <Resolution*100+FPS>
 	md_pref.dashAudio = G("prefDashAudio") || "160"; // NONE - BEST - WORST - <Bitrate>
-	md_pref.dashContainer = G("prefDashContainer") || "mp4"; // webm - mp4
+	md_pref.dashContainer = G("prefDashContainer") || "webm"; // webm - mp4
 	md_pref.muted = G("prefMuted") == "true"? true : false;
 	md_pref.volume = G("prefVolume") != undefined? parseFloat(G("prefVolume")) : 1;
 	// Page Settings
@@ -334,7 +334,7 @@ function ct_loadPreferences () {
 }
 function ct_savePreferences () {
 	// Playback Options
-	S("prefDash", md_pref.dash);
+	//S("prefDash", md_pref.dash);
 	if (md_sources) {
 		S("prefLegacyVideo", md_pref.legacyVideo);
 		S("prefDashVideo", md_pref.dashVideo);
@@ -670,14 +670,35 @@ function ct_navChannel(channel) {
 	ct_performNav();
 }
 function ct_loadChannel() {
+	ui_addLoadingIndicator(sec_channel, false);
 	yt_loadChannelData(yt_channelID, false)
-	.then (function () {
-		ct_updatePageState();
+	// Initiate further control
+	.then(function() {
+		ct_online = true;
 		console.log("YT Channel:", yt_channel);
+
+		ct_updatePageState();
+		ui_removeLoadingIndicator(sec_channel);
+		ui_setChannelMetadata();
+		ui_setupChannelTabs();
+		// Browse tabs need to load first to get continuation data - wait and then update UI
+		if (yt_channel.uploads.loadingTabs) {
+			yt_channel.uploads.loadingTabs.forEach(function (tabLoader) {
+				tabLoader.then(ui_fillChannelTab);
+			});
+		}
+		// Make sure paged content gets loaded if visible
+		ct_checkPagedContent();
 	})
-	.catch (function (error) {
-		if (error instanceof NetworkError) {
-			console.error("Network Error! Could not load Channel Page!")
+	// Handle different errors while loading
+	.catch(function(error) {
+		ui_removeLoadingIndicator(sec_channel);
+		if (!error) return; // Silent fail when request has gone stale (new page loaded before this finished)
+		if ((error.name == "TypeError" && error.message.includes("fetch")) || error instanceof NetworkError) {
+			console.error("Network Error! Could not load Channel Page!");
+		}
+		else {
+			console.error("Error " + error.name + " while loading Channel Page: " + error.message);
 		}
 	});
 }
@@ -1161,23 +1182,6 @@ function db_loadPlaylist (callback) {
 		};
 	});	
 }
-function db_getCachedVideos () {
-	return new Promise (function (resolve, reject) {
-		return db_access().then(function() {
-			var videoStore = db_database.transaction("videos", "readonly").objectStore("videos");
-			var cachedVideos = [];
-			videoStore.openCursor().onsuccess = function (e) {
-				if (e.target.result) {
-					if (e.target.result.value.cache)
-						cachedVideos.push(e.target.result.value);
-					e.target.result.continue();
-				} else {
-					resolve(cachedVideos);
-				}
-			};
-		});
-	})
-}
 function db_currentVideoAsCache() {
 	if (yt_video == undefined)
 		return undefined;
@@ -1211,7 +1215,7 @@ function db_storeVideo(video) {
 		});
 	});
 }
-function db_getVideo (videoID) {
+function db_getVideo(videoID) {
 	return db_access().then(function () {
 		return new Promise(function(resolve, reject) {
 			var transaction = db_database.transaction("videos", "readonly")
@@ -1230,6 +1234,23 @@ function db_getVideo (videoID) {
 /* ------ Stream Caching --------------------------- */
 /* ------------------------------------------------- */
 
+function db_getCachedVideos () {
+	return new Promise (function (resolve, reject) {
+		return db_access().then(function() {
+			var videoStore = db_database.transaction("videos", "readonly").objectStore("videos");
+			var cachedVideos = [];
+			videoStore.openCursor().onsuccess = function (e) {
+				if (e.target.result) {
+					if (e.target.result.value.cache)
+						cachedVideos.push(e.target.result.value);
+					e.target.result.continue();
+				} else {
+					resolve(cachedVideos);
+				}
+			};
+		});
+	});
+}
 function db_cacheStream () {
 	if (!yt_video.ready) return Promise.reject();
 	if (!md_sources || !md_sources.audio) return Promise.reject();
@@ -1242,14 +1263,13 @@ function db_cacheStream () {
 	var stream = md_selectStream(md_selectableStreams().dashAudio, ct_pref.cacheAudioQuality, md_daVal);
 	var cacheObj = { 
 		url: VIRT_CACHE + cacheID,
-		source: stream.url,
 		quality: ct_pref.cacheAudioQuality,
 		itag: stream.itag,
 	};
 
 	return window.caches.open("flagplayer-media")
 	.then (function (cache) {
-		return fetch(ct_pref.corsAPIHost + cacheObj.source, { headers: { "range": "bytes=0-" } })
+		return fetch(ct_pref.corsAPIHost + stream.url, { headers: { "range": "bytes=0-" } })
 		.then(function(response) {
 			if (!response.ok)
 				return Promise.reject(new NetworkError ("Failed to cache - response " + response.statusText));
@@ -1287,7 +1307,6 @@ function db_cacheStream () {
 		});
 	});
 }
-
 function db_deleteCachedStream (cacheID) {
 	return window.caches.open("flagplayer-media")
 	.then (function (cache) {
@@ -1304,6 +1323,9 @@ function db_deleteCachedStream (cacheID) {
 		});
 		return Promise.all([cacheWrite, databaseWrite]);
 	});
+}
+function db_getCacheSize() {
+	return (db_cachedVideos ||[]).reduce(function(sum, vid) { return sum + parseInt(vid.cache.size); }, 0);
 }
 
 //endregion
@@ -1505,24 +1527,26 @@ function yt_parseNum (numText) {
 	return num;
 }
 function yt_selectThumbnail (thumbnails) {
-	var url = thumbnails.sort(function(t1, t2) { return t1.height > t2.height? -1 : 1 })[0].url;
+	var url = (thumbnails || []).sort(function(t1, t2) { return t1.height > t2.height? -1 : 1 })[0].url;
 	if (url.startsWith("//"))
 		return "https:" + url;
 	return url;
 }
 function yt_parseDateText (dateText) {
+	dateText = dateText || "";
 	var usMatch = dateText.match(/([a-zA-Z]+\s*[0-9]+\s*,\s*[0-9]{4})/);
 	if (usMatch) return new Date(usMatch[1]);
 	var euMatch = dateText.match(/([0-9]{2})\.([0-9]{2})\.([0-9]{4})/);
 	if (euMatch) return new Date(parseInt(euMatch[3]), parseInt(euMatch[2])-1, parseInt(euMatch[1]));
 }
 function yt_parseLabel (label) {
-	return label.runs? label.runs[0].text : label.simpleText;
+	return ((label || {}).runs? label.runs[0].text : label.simpleText) || "";
 }
 function yt_parseText (text) {
-	return text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+	return (text || "").replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function yt_parseFormattedRuns(runs) {
+	runs = runs || [];
 	//return runs.map(r => r.bold? ("**" + r.text + "**") : (r.italic? ("*" + r.text + "*") : r.text)).join("");
 	var text = "";
 	for (var i = 0; i < runs.length; i++) {
@@ -1566,8 +1590,8 @@ function yt_parseAJAXVideo (vdData) {
 		categoryID: vdData.category_id,
 	};
 }
-function yt_loadListData(addElements, initialLoad, supressLoader) {
-	return function (pagedContent) { 
+function yt_loadListData(addElements, initialLoad, finished, supressLoader) {
+	return function (pagedContent) {
 		var requestURL = HOST_YT + "/list_ajax?action_get_list=1&style=json&list=" + pagedContent.data.listID + "&index=" + pagedContent.index;
 		PAGED_REQUEST(pagedContent, "GET", requestURL, false, function(listData) {
 			// Parsing
@@ -1589,8 +1613,10 @@ function yt_loadListData(addElements, initialLoad, supressLoader) {
 			addElements(pagedContent.container, pagedContent.data.videos, lastVideoCount);
 
 			// Finish
-			pagedContent.index = pagedContent.index + 100;
-			return pagedContent.data.videos.length > lastVideoCount;
+			var done = pagedContent.data.videos.length == lastVideoCount && pagedContent.index != 100;
+			if (done && finished) finished();
+			if (!done) pagedContent.index = pagedContent.index + 100;
+			return !done;
 		}, supressLoader);
 	};
 }
@@ -1612,18 +1638,18 @@ function yt_loadPlaylistData() {
 		yt_playlist.author = yt_playlist.lastPage.author; 
 		yt_playlist.views = yt_playlist.lastPage.views; 
 		yt_playlist.description = yt_parseText(yt_playlist.lastPage.description);
-		yt_playlist.thumbID = yt_playlist.videos[0].videoID;
+		yt_playlist.thumbID = (yt_playlist.videos[0] || {}).videoID;
 	};
 	var addElements = function (container, videos, prevVidCount) {
 		ui_addToPlaylist(prevVidCount);
-		if (yt_playlist.videos.length == prevVidCount) {
-			console.log("YT Playlist:", yt_playlist);
-			ui_setPlaylistFinished ();
-			yt_playlist.count = yt_playlist.videos.length;
-			if (yt_playlistLoaded) yt_playlistLoaded();
-		}
 	};
-	ct_registerPagedContent("PL", ht_playlistVideos, yt_loadListData(addElements, initialLoad, true), true, yt_playlist).index = 100;
+	var finished = function (container, videos) {
+		console.log("YT Playlist:", yt_playlist);
+		ui_setPlaylistFinished ();
+		yt_playlist.count = yt_playlist.videos.length;
+		if (yt_playlistLoaded) yt_playlistLoaded();
+	};
+	ct_registerPagedContent("PL", ht_playlistVideos, yt_loadListData(addElements, initialLoad, finished, true), true, yt_playlist);
 	ct_checkPagedContent();
 }
 
@@ -1693,15 +1719,9 @@ function yt_loadChannelData(id, background) {
 		if (!background) yt_page = page;
 		channel.meta = yt_extractChannelMetadata(page.initialData);
 		channel.uploads = yt_extractChannelUploads(page.initialData);
-		if (!background) {
-			// Fill UI and setup paged content loaders
-			ui_setChannelMetadata();
-			ui_setupChannelTabs();
-			// Browse tabs need to load first to get continuation data - wait and then update UI
-			channel.uploads.loadingTabs.forEach(function (tabLoader) {
-				tabLoader.then(ui_fillChannelTab);
-			});
-		}
+		return page;
+	}).then (function (page) {
+		return { channel: channel, page: page };
 	});
 }
 function yt_extractChannelMetadata(initialData) {
@@ -1780,16 +1800,26 @@ function yt_extractChannelPageTabs (initialData) {
 	var videoTab = tabs.find(t => t.tabRenderer.selected == true).tabRenderer; // Language-indifferent - relies on /videos/ URL - could use title=="Videos"
 	
 	var tabs = [];
-	var handleContainer = function (c) {
-		var tab = {};
+	var handleContainer = function (tab, c) {
 		if (c.sectionListRenderer) { // Usually base container with multiple itemSectionRenderers
-			c.sectionListRenderer.contents.forEach(handleContainer);
+			var listContent;
+			if (c.sectionListRenderer.subMenu) {
+				var sub = c.sectionListRenderer.subMenu.channelSubMenuRenderer;
+				if (sub.playAllButton) {
+					var play = sub.playAllButton.buttonRenderer.navigationEndpoint;
+					listContent = { // Associated list
+						listID: play.watchPlaylistEndpoint.playlistId,
+						itctToken: play.clickTrackingParams,
+					};
+				}
+			}
+			c.sectionListRenderer.contents.forEach(s => handleContainer({ listContent: listContent }, s));
 			return;
 		}
 		else if (c.itemSectionRenderer) { // Usually container with one ShelfRenderer
 			var s = c.itemSectionRenderer.contents[0];
 			if (!c.itemSectionRenderer.continuations && (s.shelfRenderer || s.verticalListRenderer || s.horizontalListRenderer || s.gridRenderer)) {
-				c.itemSectionRenderer.contents.forEach(handleContainer);
+				c.itemSectionRenderer.contents.forEach(s => handleContainer(tab, s));
 				return;
 			}
 			// It directly contains videos
@@ -1837,7 +1867,7 @@ function yt_extractChannelPageTabs (initialData) {
 		tab.id = tab.title.toLowerCase().replace(/\s/g, "-");
 		tabs.push(tab);
 	};
-	handleContainer(videoTab.content);
+	handleContainer({}, videoTab.content);
 	return tabs;
 }
 function yt_loadChannelPageUploads(pagedContent) {
@@ -1931,23 +1961,12 @@ function yt_loadVideoData(id, background) {
 
 		// Extract metadata
 		video.meta = yt_extractVideoMetadata(page);
-		//if (!background) ui_setVideoMetadata();
 
 		if (!video.blocked) {
-			//if (!background) ui_setupMediaSession();
 			// Extract related videos
 			video.related = yt_extractRelatedVideoData(page.initialData);
-			//if (!background) ui_addRelatedVideos(0);
 			// Extract comments
 			video.comments = yt_extractVideoCommentData(page.initialData);
-			// Setup paged content loaders
-			/*if (!background) {
-				if (video.related.conToken && ct_isAdvancedCorsHost)
-					ct_registerPagedContent("RV", I("relatedContainer"), yt_loadMoreRelatedVideos, ct_isDesktop? 100 : false, video.related);
-				if (video.comments.conToken && ct_isAdvancedCorsHost && ct_pref.loadComments)
-					ct_registerPagedContent("CM", I("vdCommentList"), yt_loadMoreComments, 100, video.comments);
-				ct_checkPagedContent();
-			}*/
 			// Extract and decode stream data
 			return yt_decodeStreams(page.config)
 			.then (function (streams) {
@@ -2409,16 +2428,17 @@ function yt_decodeStreams (config) {
 		for (var i = 0; i < streams.length; i++) {
 			// Copy and process data into new stream object
 			var s = streams[i];
-			var stream = {};
-			stream.url = s.url;
-			var itag = stream.itag = s.itag;
+			var stream = { itag: s.itag, url: s.url };
 
-			// ITag Data
-			if (ITAGS[itag] == undefined) {
-				if (itag != undefined)
-					console.error("Unknown stream ITag '" + itag + "' (" + config.args.loaderUrl + ")");
+			// Verify itag
+			var itag = s.itag;
+			if (itag == undefined) continue; // Yes these pop up recently
+			else if (ITAGS[itag] == undefined) {
+				console.error("Unknown stream ITag '" + itag + "' (" + config.args.loaderUrl + ")");
 				continue;
 			}
+
+			// ITag Data
 			stream.isLive = ITAGS[itag].hls || false;
 			stream.isStereo = ITAGS[itag].ss3D || false;
 
@@ -2571,14 +2591,16 @@ function ui_updateSoundState () {
 	I("volumePosition").style.left = (md_pref.muted? 0 : md_pref.volume*100) + "%";
 }
 function ui_updateOptionsState () {
-	setDisplay("optionsPanel", ct_temp.options? "flex" : "none");
+	setDisplay("optionsPanel", ct_temp.options? "" : "none");
 	I("optionsButton").setAttribute("state", ct_temp.options? "on" : "off");
-	I("loopToggle").checked = ct_temp.loop;
+	I("opt_loop").checked = ct_temp.loop;
+	I("opt_autoplay").checked = ct_pref.autoplay;
+	I("opt_plshuffle").checked = ct_pref.playlistRandom;
 }
 function ui_updateStreamState (selectedStreams) {
-	I("legacyStreamToggle").checked = !md_pref.dash;
-	setDisplay("legacyStreamGroup", md_pref.dash? "none" : "block");
-	setDisplay("dashStreamGroup", md_pref.dash? "block" : "none");
+	//I("legacyStreamToggle").checked = !md_pref.dash;
+	setDisplay("legacyStreamGroup", md_pref.dash? "none" : "");
+	setDisplay("dashStreamGroup", md_pref.dash? "" : "none");
 	I("select_dashContainer").value = md_pref.dashContainer;
 	if (selectedStreams) {
 		I("select_dashVideo").value = !selectedStreams.dashAudio? "NONE" : 
@@ -2707,9 +2729,14 @@ function ui_formatText(text) {
 	// Replace newlines with tags
 	text = text.replace(/\n/g, '<br>\n');
 	// URLs starting with http://, https://, or ftp://
-	text = text.replace(/(^|\s|[^\w\/<>])((?:https?|ftp):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gim, '$1<a href="$2">$2</a>');
+//	text = text.replace(/(^|\s|[^\w\/<>])((?:https?|ftp):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gim, '$1<a href="$2">$2</a>');
+	text = text.replace(/(^|\s|[^\w\/<>])((?:https?|ftp):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gim, (match, beg, url) => 
+		beg + '<a href="' + url + '">' + decodeURIComponent(url) + '</a>');
 	// URLs starting with "www."
-	text = text.replace(/(^|\s|[^\w\/<>])(?:^|[^\/])(www\.[\S]+(\b|$))/gim, '$1<a href="http://$2">$2</a>');
+//	text = text.replace(/(^|\s|[^\w\/<>])(?:^|[^\/])(www\.[\S]+(\b|$))/gim, '$1<a href="http://$2">$2</a>');
+	text = text.replace(/(^|\s|[^\w\/<>])(?:^|[^\/])(www\.[\S]+(\b|$))/gim, (match, beg, url) => 
+		beg + '<a href="http://' + url + '">' + decodeURIComponent(url) + '</a>');
+
 	// Change email addresses to mailto:: links.
 	text = text.replace(/(^|\s|[^\w\/<>])([a-zA-Z0-9\-\_\.]+@[a-zA-Z\_]+?(?:\.[a-zA-Z]{2,6})+)/gim, '$1<a href="mailto:$2">$2</a>');
 	// Change timestamps to clickable timestamp links.
@@ -2734,20 +2761,17 @@ function ui_formatText(text) {
 
 function ui_openSettings () {
 	setDisplay("settingsPanel", "block");
-	I("st_autoplay").checked = ct_pref.autoplay;
-	I("st_plshuffle").checked = ct_pref.playlistRandom;
 	I("st_theme").value = ct_pref.theme;
+	I("st_small_player").checked = ct_pref.smallPlayer;
 	I("st_related").value = ct_pref.relatedVideos;
-	I("st_corsHost").value = ct_pref.corsAPIHost;
-	I("st_filter_hide").checked = ct_pref.filterHideCompletely;
 	I("st_comments").checked = ct_pref.loadComments;
+	I("st_corsHost").value = ct_pref.corsAPIHost;
 	I("st_cache_quality").value = ct_pref.cacheAudioQuality;
 	I("st_cache_force").checked = ct_pref.cacheForceUse;
-	I("st_small_player").checked = ct_pref.smallPlayer;
-	var filterCats = I("st_filter_categories");
-	ui_fillCategoryFilter(filterCats);
-	filterCats.firstElementChild.innerText = filterCats.countUnselected() + " filtered";
-} 
+	db_getCachedVideos().then(function() {
+		I("st_cache_usage").innerText = ui_shortenBytes(db_getCacheSize());
+	});
+}
 function ui_closeSettings () {
 	setDisplay("settingsPanel", "none");
 } 
@@ -2760,11 +2784,13 @@ function ui_closeSettings () {
 function ui_setupHome () {
 	if (ct_page != Page.Home) return;
 	var playlistContainer = I("homePlaylists");
-	playlistContainer.innerHTML = "";
 	db_accessPlaylists().then(function () {
-		db_playlists.forEach(function (pl) {
-			ht_appendPlaylistElement(playlistContainer, pl.listID, pl.thumbID, pl.title, pl.author, pl.count + " videos");
-		});
+		if (db_playlists.length > 0) {
+			playlistContainer.innerHTML = "";
+			db_playlists.forEach(function (pl) {
+				ht_appendPlaylistElement(playlistContainer, pl.listID, pl.thumbID, pl.title, (pl.author || "Autogenerated"), pl.count + " videos");
+			});
+		} // Else just leave the introduction
 		sec_home.style.display = "block";
 	});
 }
@@ -2782,16 +2808,11 @@ function ui_resetHome () {
 function ui_setupCache () {
 	if (ct_page != Page.Cache) return;
 	I("cacheAmount").innerText = db_cachedVideos.length;
-	var bytesUsed = db_cachedVideos.reduce(function(sum, vid) { return sum + parseInt(vid.cache.size); }, 0);
-	if ("storage" in navigator) {
-		navigator.storage.estimate().then(function(estimate) {
-			I("cacheQuota").innerText = ui_shortenBytes(bytesUsed) + " (" + ui_shortenBytes(estimate.usage) + " / " + ui_shortenBytes(estimate.quota) + ")";
-		}).catch(function() { I("cacheQuota").innerText = ui_shortenBytes(bytesUsed); });
-	} else I("cacheQuota").innerText = ui_shortenBytes(bytesUsed);
+	I("cacheUsage").innerText = ui_shortenBytes(db_getCacheSize());
 	var cachedVideoList = I("cacheVideoList");
 	cachedVideoList.innerHTML = "";
 	db_cachedVideos.forEach(function (v) {
-		ht_appendVideoElement(cachedVideoList, undefined, v.videoID, ui_formatTimeText(v.length), v.title, v.uploader.name, ui_shortenBytes(v.cache.size), {
+		ht_appendVideoElement(cachedVideoList, undefined, v.videoID, ui_formatTimeText(v.length), v.title, v.uploader.name, v.cache.quality + "Kbps (" + ui_shortenBytes(v.cache.size) + ")", {
 			class: "cacheVideoContext",
 			entries: ['<span tabindex="0" value="cacheDelete-' + v.videoID + '">Delete Cache</span>'],
 		});
@@ -3070,18 +3091,18 @@ function ui_setupChannelTabs () {
 	var container = I("chVideoContainer");
 	if (yt_channel.uploads.tabs.length == 1) {
 		var tab = yt_channel.uploads.tabs[0];
-		tab.section = ht_appendFullVideoSection(container, tab.title, tab.id);
+		tab.section = ht_appendFullVideoSection(container, tab.title, tab.id, tab.listContent? tab.listContent.listID : undefined);
 		tab.container = I("f-" + tab.id);
 		tabBar.style.display = "none";
 	} else {
 		ht_appendTabHeader(tabBar, "Overview", "overview").setAttribute("selected", "");
 		yt_channel.uploads.tabs.forEach (function (tab) {
 			tab.tabHeader = ht_appendTabHeader(tabBar, tab.title, tab.id);
-			tab.section = ht_appendFullVideoSection(container, tab.title, tab.id);
+			tab.section = ht_appendFullVideoSection(container, undefined, tab.id, tab.listContent? tab.listContent.listID : undefined);
 			tab.section.style.display = "none";
-			tab.container = I("f-" + tab.id)
-			tab.smallSection = ht_appendCollapsedVideoSection(container, tab.title, tab.id);
-			tab.smallContainer = I("c-" + tab.id)
+			tab.container = I("f-" + tab.id);
+			tab.smallSection = ht_appendCollapsedVideoSection(container, tab.title, tab.id, tab.listContent? tab.listContent.listID : undefined);
+			tab.smallContainer = I("c-" + tab.id);
 		});
 		tabBar.style.display = "flex";
 	}
@@ -3152,7 +3173,7 @@ function ui_setPlaylistFinished () {
 }
 function ui_addToPlaylist (startIndex) {
 	I("plTitle").innerText = yt_playlist.title;
-	I("plDetail").innerText = yt_playlist.author + " - " + yt_playlist.videos.length + " videos";
+	I("plDetail").innerText = (yt_playlist.author || "Autogenerated") + " - " + yt_playlist.videos.length + " videos";
 	ui_removeLoadingIndicator(ht_playlistVideos);
 	if (!startIndex) startIndex = 0;
 	var focusIndex = undefined;
@@ -3574,42 +3595,41 @@ function ui_setupEventHandlers () {
 	I("playButton").onclick = onControlPlay;
 	I("nextButton").onclick = onControlNext;
 	I("muteButton").onclick = onControlMute;
-	I("optionsButton").onclick = onToggleOptions;
+	I("optionsButton").onclick = onOptionsToggle;
 	I("fullscreenButton").onclick = onToggleFullscreen;
 	I("volumeSlider").onchange = onControlVolumeChange;
-	// Options Panel
-	I("select_legacy").onchange = onSelectStreams;
-	I("select_dashContainer").onchange = onSelectStreams;
-	I("select_dashVideo").onchange = onSelectStreams;
-	I("select_dashAudio").onchange = onSelectStreams;
-	I("legacyStreamToggle").onchange = onToggleLegacyStream;
-	I("loopToggle").onchange = onToggleLoop;
 	// Playlist
-	I("plClose").onclick = ct_resetPlaylist;
-	I("plSave").onclick = db_savePlaylist;
 	I("plRemove").onclick = db_removePlaylist;
+	I("plSave").onclick = db_savePlaylist;
 	I("plUpdate").onclick = ct_updatePlaylist;
-	// Context
-	I("videoContextActions").onchange = onSelectContextAction;
-	I("commentContextActions").onchange = onSelectContextAction;
-	I("channelContextActions").onchange = onSelectContextAction;
+	I("plClose").onclick = ct_resetPlaylist;
+	// Options Panel
+	I("select_legacy").onchange = function () { onOptionsChange("ST"); };
+	I("select_dashContainer").onchange = function () { onOptionsChange("ST"); };
+	I("select_dashVideo").onchange = function () { onOptionsChange("ST"); };
+	I("select_dashAudio").onchange = function () { onOptionsChange("ST"); };
+	I("opt_loop").onchange = function () { onOptionsChange("LP"); };
+	I("opt_autoplay").onchange = function () { onOptionsChange("AP"); };
+	I("opt_plshuffle").onchange = function () { onOptionsChange("PS"); };
 	// Settings Panel
 	I("st_theme").onchange = function () { onSettingsChange("TH"); };
-	I("st_autoplay").onchange = function () { onSettingsChange("AP"); };
-	I("st_plshuffle").onchange = function () { onSettingsChange("PS"); };
 	I("st_related").onchange = function () { onSettingsChange("RV"); };
-	I("st_filter_categories").onchange = function () { onSettingsChange("FV"); };
-	I("st_filter_hide").onchange = function () { onSettingsChange("FV"); };
+	//I("st_filter_categories").onchange = function () { onSettingsChange("FV"); };
+	//I("st_filter_hide").onchange = function () { onSettingsChange("FV"); };
 	I("st_comments").onchange = function () { onSettingsChange("CM"); };
 	I("st_corsHost").onchange = function () { onSettingsChange("CH"); };
 	I("st_cache_quality").onchange = function () { onSettingsChange("CC"); };
 	I("st_cache_force").onchange = function () { onSettingsChange("CC"); };
 	I("st_small_player").onchange = function () { onSettingsChange("SP"); };
+	// Context
+	I("videoContextActions").onchange = onSelectContextAction;
+	I("commentContextActions").onchange = onSelectContextAction;
+	I("channelContextActions").onchange = onSelectContextAction;
+	I("searchContextActions").onchange = onSelectContextAction;
 	// Search Bar
 	I("search_categories").onchange = onSearchUpdate;
 	onToggleButton(I("search_hideCompletely"), onSearchUpdate);
-	I("searchContextActions").onchange = onSelectContextAction;
-	// Update Notifications
+	// Notifications
 	var notifications = document.getElementsByClassName("notificationDismiss");
 	[].forEach.call(notifications, function (d) {
 		d.onclick = function() { d.parentElement.style.display = "none"; };
@@ -3665,12 +3685,6 @@ function onSettingsToggle () {
 }
 function onSettingsChange (hint) {
 	switch (hint) {
-		case "AP": 
-			ct_pref.autoplay = I("st_autoplay").checked;
-			break;
-		case "PS": 
-			ct_pref.playlistRandom = I("st_plshuffle").checked;
-			break;
 		case "CH":
 			ct_pref.corsAPIHost = I("st_corsHost").value;
 			if (!ct_pref.corsAPIHost.endsWith("/")) ct_pref.corsAPIHost += "/";
@@ -3700,7 +3714,33 @@ function onSettingsChange (hint) {
 			ui_updatePageLayout(true);
 			break;
 		default: 
+			return;
+	}
+	ct_savePreferences();
+}
+function onOptionsToggle () {
+	ct_temp.options = !ct_temp.options;
+	ui_updateOptionsState();
+	ui_updateControlBar();
+}
+function onOptionsChange (hint) {
+	switch (hint) {
+		case "ST":
+			md_pref.legacyVideo = I("select_legacy").value;
+			md_pref.dashVideo = I("select_dashVideo").value;
+			md_pref.dashAudio = I("select_dashAudio").value;
+			md_pref.dashContainer = I("select_dashContainer").value;
+			md_updateStreams();
+		case "LP":
+			ct_temp.loop = I("opt_loop").checked;
+		case "AP": 
+			ct_pref.autoplay = I("opt_autoplay").checked;
 			break;
+		case "PS": 
+			ct_pref.playlistRandom = I("opt_plshuffle").checked;
+			break;
+		default:
+			return;
 	}
 	ct_savePreferences();
 }
@@ -3735,28 +3775,6 @@ function onToggleFullscreen () {
 	ct_temp.fullscreen = !ct_temp.fullscreen;
 	ui_updateFullscreenState();
 }
-function onToggleOptions () {
-	ct_temp.options = !ct_temp.options;
-	ui_updateOptionsState();
-	ui_updateControlBar();
-}
-function onToggleLoop() {
-	ct_temp.loop = !ct_temp.loop;
-	ui_updateOptionsState();
-}
-function onToggleLegacyStream() {
-	md_pref.dash = !md_pref.dash;
-	ct_savePreferences();
-	md_updateStreams();
-}
-function onSelectStreams () {
-	md_pref.legacyVideo = I("select_legacy").value;
-	md_pref.dashVideo = I("select_dashVideo").value;
-	md_pref.dashAudio = I("select_dashAudio").value;
-	md_pref.dashContainer = I("select_dashContainer").value;
-	ct_savePreferences();
-	md_updateStreams();
-}
 function onSelectContextAction (selectedValue, dropdownElement, selectedElement) {
 	var selectedValue = selectedValue || "";
 	if (selectedValue == "cmTop") yt_loadTopComments();
@@ -3765,11 +3783,11 @@ function onSelectContextAction (selectedValue, dropdownElement, selectedElement)
 		db_cacheStream()
 		.then(function() { setDisplay("cacheStreamPanel", ""); })
 		.catch(function(){ console.error("Failed to cache audio stream!"); });
-	else if (selectedValue == "downloadAudio" && yt_video && yt_video.ready)
+	else if (selectedValue == "linkAudio" && yt_video && yt_video.ready)
 		window.open(md_selectStream(md_selectableStreams().dashAudio, "BEST", md_daVal).url);
-	else if (selectedValue == "downloadVideo" && yt_video && yt_video.ready)
+	else if (selectedValue == "linkVideo" && yt_video && yt_video.ready)
 		window.open(md_selectStream(md_selectableStreams().dashVideo, "BEST", md_dvVal).url);
-	else if (selectedValue == "thumbnailImgLink" && yt_video && yt_video.ready)
+	else if (selectedValue == "linkThumbnail" && yt_video && yt_video.ready)
 		window.open(yt_video.meta.thumbnailURL);
 	else if (selectedValue.startsWith("cacheDelete-"))
 		db_deleteCachedStream(selectedValue.substring(12))
@@ -3822,7 +3840,7 @@ function onMouseClick (mouse) {
 
 	// Handle click outside of fullscreen panel to close it
 	if (mouse.target.classList.contains("fullscreenPanel")) {
-		if (mouse.target.id == "settingsPanel") ui_closeSettings();
+		if (mouse.target.id == "settingsPanel") onSettingsToggle();
 		else mouse.target.style.display = "none";
 		mouse.preventDefault();
 		return;
@@ -3830,7 +3848,7 @@ function onMouseClick (mouse) {
 	
 	// Handle Close Options when clicked outside of opened panel or button
 	if (ct_temp.options && !ui_hasCascadedID(mouse.target, "optionsButton", 3) && !ui_hasCascadedID(mouse.target, "optionsPanel", 4)) {
-		onToggleOptions();
+		onOptionsToggle();
 		overridePlayer = true;
 	}
 	
@@ -4566,18 +4584,20 @@ function ht_appendTabHeader (container, label, id) {
 		'<button class="tabHeader" id="h-' + id + '" navigation="tab=' + id +  '">' + label + '</button>');
 	return container.lastElementChild;
 }
-function ht_appendCollapsedVideoSection (container, label, id) {
+function ht_appendCollapsedVideoSection (container, label, id, listID) {
 	container.insertAdjacentHTML ("beforeEnd",
 		'<div class="videoSection">' +
 			'<button class="videoSectionHeader" navigation="tab=' + id +  '">' + label + '</button>' +
+(!listID? "" : '<a class="videoSectionLabel" navigation="list=' + listID + '" href="' + ct_getNavLink("list=" + listID) + '">Play All</a>') +
 			'<div class="videoList" id="c-' + id + '"></div>' +
 		'</div>');
 	return container.lastElementChild;
 }
-function ht_appendFullVideoSection (container, label, id) {
+function ht_appendFullVideoSection (container, label, id, listID) {
 	container.insertAdjacentHTML ("beforeEnd",
 		'<div class="videoSection">' +
-			//'<div class="videoSectionLabel">' + label + '</div>' +
+(!label? "" : '<span class="videoSectionLabel">' + label + '</span>') +
+(!listID? "" : '<a class="videoSectionLabel" navigation="list=' + listID + '" href="' + ct_getNavLink("list=" + listID) + '">Play All</a>') +
 			'<div class="videoList" id="f-' + id + '"></div>' +
 		'</div>');
 	return container.lastElementChild;
