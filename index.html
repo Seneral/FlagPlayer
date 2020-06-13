@@ -30,9 +30,9 @@ See https://github.com/Seneral/FlagPlayer for details
 
 	<header class="header">
 		<div class="side left">
-			<a class="headerIcon flagPlayerLogo" href="index.html">
-				<svg class="darkIcon" viewBox="0 0 48 32"><use href="#svg_logo_flag_dark"/></svg>
-				<svg class="lightIcon" viewBox="0 0 48 32"><use href="#svg_logo_flag"/></svg>
+			<a class="headerIcon flagPlayerLogo" href="index.html" navigation="view=home">
+				<svg class="darkIcon" viewBox="0 0 48 32" nav><use href="#svg_logo_flag_dark" nav/></svg>
+				<svg class="lightIcon" viewBox="0 0 48 32" nav><use href="#svg_logo_flag" nav/></svg>
 			</a>
 		</div>
 		<div class="center searchBar"> 
@@ -249,6 +249,12 @@ See https://github.com/Seneral/FlagPlayer for details
 				
 				<!-- Cache Content -->
 				<main class="section cache" id="cache">
+					<div class="freeText" id="cachePersistence" style="display: none;">
+						Browser rejects Cache Persistence! </br>
+						Your playlists and audio cache may be cleared by the browser when space is running low. </br>
+						Try bookmarking FlagPlayer or adding it to the home screen if data keeps dissappearing. </br>
+						</br>
+					</div>
 					<div class="actionBar headerBar">
 						<span class="barLabel">Cached Audio Streams:</span>
 						<span class="barText" id="cacheAmount">0</span>
@@ -445,9 +451,11 @@ See https://github.com/Seneral/FlagPlayer for details
 				</div>
 
 				<div>
-					<a class="freeLink" href="?view=cache">Audio Cache</a>
-					<a class="freeLink rightControl" href="?view=cache">View All</a>
-					<a class="freeLink rightControl" href="?view=cache" id="st_cache_usage">0B</a>
+					<a class="freeLink" href="?view=cache" navigation="view=cache">
+						Audio Cache
+						<span class="rightControl" id="st_cache_usage" nav>0B - View All</span>
+						<span class="rightControl" id="st_cache_persistence" nav style="display: none;">(!!)</span>
+					</a>
 					</br>
 					<span>Cache Quality</span>
 					<select class="selector rightControl" id="st_cache_quality">
@@ -481,23 +489,7 @@ See https://github.com/Seneral/FlagPlayer for details
 		</div>
 	</div>
 
-	<div class="notificationContainer">
-		<div class="notificationPanel" id="newVersionPanel" style="display: none;">
-			<div> A new version is available! <button id="newVersionUpdate">Update now</button> </div>
-			<div class="flexSpace"></div>
-			<button class="notificationDismiss icon">
-				<svg viewBox="6 6 36 36"><use href="#svg_cross"/></svg>
-			</button>
-		</div>
-
-		<div class="notificationPanel" id="cacheStreamPanel" style="display: none;">
-			<div> Cached audio stream! <button id="seeCacheButton">See Cache</button> </div>
-			<div class="flexSpace"></div>
-			<button class="notificationDismiss icon">
-				<svg viewBox="6 6 36 36"><use href="#svg_cross"/></svg>
-			</button>
-		</div>
-	</div>
+	<div class="notificationContainer" id="notificationContainer"></div>
 
 	<!-- SVG ICONS -->
 	<svg style="position: absolute; width: 0; height: 0;">
