@@ -257,7 +257,11 @@ function sw_install () {
 				console.log("Found new service worker version!");
 				var update = function () {
 					sw_updated = registration.waiting || registration.active;
-					setDisplay("newVersionPanel", "");
+					var not = ui_setNotification("newVersionPanel", 'A new version is available! <button>Update now</button>');
+					not.children[0].onclick = function() {
+						sw_updated.postMessage({ action: "skipWaiting" });
+						not.notClose();
+					};
 					console.log("New service worker version ready for activation!");
 				};
 				var installing = registration.installing;
@@ -276,11 +280,6 @@ function sw_install () {
 		});
 	}
 }
-function sw_update () { 
-	sw_updated.postMessage({ action: "skipWaiting" });
-	setDisplay("newVersionPanel", "none");
-}
-
 
 /* -------------------------------------------------------------------------------------------------------------- */
 /* ----------------- CONTROL FUNCTIONS -------------------------------------------------------------------------- */
@@ -311,11 +310,11 @@ function ct_init () {
 function ct_loadPreferences () {
 	// Playback options
 	md_pref = {};
-	md_pref.dash = G("prefDash") == "false"? false : true;
+	md_pref.dash = true;//G("prefDash") == "false"? false : true;
 	md_pref.legacyVideo = G("prefLegacyVideo") || "BEST"; // NONE - BEST - WORST - <Resolution>
 	md_pref.dashVideo = G("prefDashVideo") || "72030"; // NONE - BEST - WORST - <Resolution*100+FPS>
 	md_pref.dashAudio = G("prefDashAudio") || "160"; // NONE - BEST - WORST - <Bitrate>
-	md_pref.dashContainer = G("prefDashContainer") || "mp4"; // webm - mp4
+	md_pref.dashContainer = G("prefDashContainer") || "webm"; // webm - mp4
 	md_pref.muted = G("prefMuted") == "true"? true : false;
 	md_pref.volume = G("prefVolume") != undefined? parseFloat(G("prefVolume")) : 1;
 	// Page Settings
@@ -334,7 +333,7 @@ function ct_loadPreferences () {
 }
 function ct_savePreferences () {
 	// Playback Options
-	S("prefDash", md_pref.dash);
+	//S("prefDash", md_pref.dash);
 	if (md_sources) {
 		S("prefLegacyVideo", md_pref.legacyVideo);
 		S("prefDashVideo", md_pref.dashVideo);
@@ -573,14 +572,32 @@ function ct_navCache () {
 }
 
 function ct_loadCache () {
-	db_getCachedVideos()
-	.then (function (cachedVideos) {
-		db_cachedVideos = cachedVideos;
-		ui_setupCache();
-	}).catch (function() {
-
+	db_getCachedVideos().then(ui_setupCache);
+	db_requestPersistence().then(function(persistence) {
+		if (!persistence) I("cachePersistence").style.display = "";
 	});
+}
 
+function ct_cacheVideo(video) {
+	if (I(notID) != undefined) return; // Already started
+	var videoID = video.videoID;
+	var notID = 'cache-' + videoID;
+	var abort = false;
+	ui_setNotification(notID, "Caching " + videoID + "...").notOnClose = function() { abort = true; };
+	db_cacheStream(video, function(bytesReceived, bytesTotal) {
+		if (abort) return false;
+		ui_setNotification(notID, 'Caching ' + videoID + ': ' + ui_shortenBytes(bytesReceived) + '/' + ui_shortenBytes(bytesTotal) + '');
+		return true;
+	}).then(function(cache) { 
+		var not = ui_setNotification(notID, 'Caching ' + videoID + ': ' + ui_shortenBytes(cache.size) + ' - ' +
+			'<button id="seeCacheButton">View Cache</button>', 3000);
+		not.notContent.children[0].onclick = function () { not.notClose(); ct_navCache(); };
+		video.cache = cache;
+		// In case current view is cache, update the view
+		db_getCachedVideos().then(ui_setupCache);
+	}).catch(function(e) {
+		if (!abort) ui_setNotification(notID, 'Caching ' + videoID + ': Error: ' + (e? e.message : "unknown"));
+	});
 }
 
 
@@ -637,7 +654,7 @@ function ct_getVideoPlIndex () { // Return -1 on fail so that pos+1 will be 0
 
 function ct_navSearch(searchTerms) {
 	var plMatch = searchTerms.match(/(PL[a-zA-Z0-9_-]{32})/) || searchTerms.match(/list=([a-zA-Z0-9_-]{20,})(?:&|$)/) || searchTerms.match(/^([A-Z]{2}[a-zA-Z0-9_-]{20,})$/);
-	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/);
+	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/) || searchTerms.match(/^([a-zA-Z0-9_-]{11})$/);
 	if (plMatch) ct_loadPlaylist(plMatch[1]);
 	if (!plMatch || vdMatch) {
 		ct_beforeNav();
@@ -670,14 +687,35 @@ function ct_navChannel(channel) {
 	ct_performNav();
 }
 function ct_loadChannel() {
+	ui_addLoadingIndicator(sec_channel, false);
 	yt_loadChannelData(yt_channelID, false)
-	.then (function () {
-		ct_updatePageState();
+	// Initiate further control
+	.then(function() {
+		ct_online = true;
 		console.log("YT Channel:", yt_channel);
+
+		ct_updatePageState();
+		ui_removeLoadingIndicator(sec_channel);
+		ui_setChannelMetadata();
+		ui_setupChannelTabs();
+		// Browse tabs need to load first to get continuation data - wait and then update UI
+		if (yt_channel.uploads.loadingTabs) {
+			yt_channel.uploads.loadingTabs.forEach(function (tabLoader) {
+				tabLoader.then(ui_fillChannelTab);
+			});
+		}
+		// Make sure paged content gets loaded if visible
+		ct_checkPagedContent();
 	})
-	.catch (function (error) {
-		if (error instanceof NetworkError) {
-			console.error("Network Error! Could not load Channel Page!")
+	// Handle different errors while loading
+	.catch(function(error) {
+		ui_removeLoadingIndicator(sec_channel);
+		if (!error) return; // Silent fail when request has gone stale (new page loaded before this finished)
+		if ((error.name == "TypeError" && error.message.includes("fetch")) || error instanceof NetworkError) {
+			console.error("Network Error! Could not load Channel Page!");
+		}
+		else {
+			console.error("Error " + error.name + " while loading Channel Page: " + error.message);
 		}
 	});
 }
@@ -847,13 +885,15 @@ function ct_mediaError (error) {
 	clearTimeout(md_timerCheckBuffering);
 	if (error instanceof MDError && error.tag && error.tag.src.startsWith(VIRT_CACHE)) {
 		console.error("Cached media file erroneous! Removing from cache. ", error);
+		md_resetStreams();
 		db_deleteCachedStream(yt_videoID).then (function () {
 			if (ct_online) { // Load source
 				md_updateStreams();
 				ui_updateStreamState();
 			} else ct_startAutoplay(8);
 		});
-		error.minor = true; // assume minor
+		ui_setNotification("vd-" + yt_videoID, 'Cache of ' + yt_videoID + ' is invalid, removed entry!', 5000);
+		return;
 	} else if (error instanceof MDError && error.code == 4) {
 		console.error("Can't play selected stream!");
 		var stream = yt_video.streams.find(s => s.url == error.tag.src);
@@ -983,13 +1023,17 @@ function ct_stopAutoplay () {
 
 function db_requestPersistence() {
 	if ("storage" in navigator && "persist" in navigator.storage) {
-		return navigator.storage.persist()
-		.then(function(success) {
-			if (!success) console.warning("Failed to request persistant storage - playlists and cached videos may be deleted by browser at any point!");
-			return success;
+		return navigator.storage.persisted()
+		.then(function(persisted) {
+			if (persisted) return true;
+			return navigator.storage.persist()
+			.then(function(success) {
+				if (!success) console.warn("Failed to request persistant storage - playlists and cached videos may be deleted by browser at any point!");
+				return success;
+			});
 		});
 	} else {
-		return Promise.reject();
+		return false;
 	}
 }
 function db_access () {
@@ -1161,23 +1205,6 @@ function db_loadPlaylist (callback) {
 		};
 	});	
 }
-function db_getCachedVideos () {
-	return new Promise (function (resolve, reject) {
-		return db_access().then(function() {
-			var videoStore = db_database.transaction("videos", "readonly").objectStore("videos");
-			var cachedVideos = [];
-			videoStore.openCursor().onsuccess = function (e) {
-				if (e.target.result) {
-					if (e.target.result.value.cache)
-						cachedVideos.push(e.target.result.value);
-					e.target.result.continue();
-				} else {
-					resolve(cachedVideos);
-				}
-			};
-		});
-	})
-}
 function db_currentVideoAsCache() {
 	if (yt_video == undefined)
 		return undefined;
@@ -1211,7 +1238,7 @@ function db_storeVideo(video) {
 		});
 	});
 }
-function db_getVideo (videoID) {
+function db_getVideo(videoID) {
 	return db_access().then(function () {
 		return new Promise(function(resolve, reject) {
 			var transaction = db_database.transaction("videos", "readonly")
@@ -1230,64 +1257,93 @@ function db_getVideo (videoID) {
 /* ------ Stream Caching --------------------------- */
 /* ------------------------------------------------- */
 
-function db_cacheStream () {
-	if (!yt_video.ready) return Promise.reject();
-	if (!md_sources || !md_sources.audio) return Promise.reject();
-	if (!("serviceWorker" in navigator) || !sw_current) {
-		console.error("Service Worker required in order to cache videos!");
-		return Promise.reject();
-	}
+function db_getCachedVideos () {
+	return new Promise (function (resolve, reject) {
+		return db_access().then(function() {
+			var videoStore = db_database.transaction("videos", "readonly").objectStore("videos");
+			var cachedVideos = [];
+			videoStore.openCursor().onsuccess = function (e) {
+				if (e.target.result) {
+					if (e.target.result.value.cache)
+						cachedVideos.push(e.target.result.value);
+					e.target.result.continue();
+				} else {
+					db_cachedVideos = cachedVideos;
+					resolve(cachedVideos);
+				}
+			};
+		});
+	});
+}
+function db_cacheStream (video, progress) {
+	if (!video.ready) return Promise.reject({ message: "Video not ready!" });
+	if (!("serviceWorker" in navigator) || !sw_current) return Promise.reject({ message: "No Service Worker - reload!"});
 
-	var cacheID = yt_video.videoID;
-	var stream = md_selectStream(md_selectableStreams().dashAudio, ct_pref.cacheAudioQuality, md_daVal);
+	var cacheID = video.videoID;
+	var stream = md_selectStream(md_selectableStreams(video).dashAudio, ct_pref.cacheAudioQuality, md_daVal);
 	var cacheObj = { 
 		url: VIRT_CACHE + cacheID,
-		source: stream.url,
-		quality: ct_pref.cacheAudioQuality,
+		quality: stream.aBR,
 		itag: stream.itag,
 	};
+	var controller = new AbortController();
 
-	return window.caches.open("flagplayer-media")
-	.then (function (cache) {
-		return fetch(ct_pref.corsAPIHost + cacheObj.source, { headers: { "range": "bytes=0-" } })
-		.then(function(response) {
-			if (!response.ok)
-				return Promise.reject(new NetworkError ("Failed to cache - response " + response.statusText));
+	return fetch(ct_pref.corsAPIHost + stream.url, { headers: { "range": "bytes=0-" }, signal: controller.signal })
+	.then(function(response) {
+		if (!response.ok)
+			return Promise.reject(new NetworkError (response.statusText));
 
-			cacheObj.size = parseInt(response.headers.get("content-length"));
-			console.log("Downloaded video stream! Size: " + ui_shortenBytes(cacheObj.size));
-			
-			// Add to cache
-			var cacheWrite = cache.put(cacheObj.url, new Response(response.body, {
+		cacheObj.size = parseInt(response.headers.get("content-length"));
+		if (progress && !progress(0, cacheObj.size)) {
+			controller.abort();
+			return Promise.reject({ message: "Aborted!" });
+		}
+
+		// Split stream to cache and progress streams
+		var dataStreams = response.body.tee();
+		
+		// Add to cache
+		var cacheWrite = window.caches.open("flagplayer-media")
+		.then(function(cache) {
+			return cache.put(cacheObj.url, new Response(dataStreams[0], {
 				status: 200,
 				headers: {
 					"content-length": response.headers.get("content-length"),
 					"content-type": response.headers.get("content-type"),
 				},
 			}));
-
-			// Add to database
-			var databaseWrite = db_access().then(function () {
-				var dbVideos = db_database.transaction("videos", "readwrite").objectStore("videos");
-				return new Promise (function (resolve, reject) {
-					dbVideos.get(cacheID).onsuccess = function (e) {
-						var cachedVideo;
-						if (e.target.result)
-							cachedVideo = e.target.result;
-						else // In case current video was never cached
-							cachedVideo = db_currentVideoAsCache();
-						cachedVideo.cache = cacheObj;
-						dbVideos.put(cachedVideo).onsuccess = resolve;
-						db_requestPersistence();
-					};
-				});
-			});
-
-			return Promise.all([cacheWrite, databaseWrite]);
 		});
+
+		var progressWatch = new Promise(async function(resolve, reject) {
+			const reader = dataStreams[1].getReader();
+			let bytesReceived = 0;
+			while (true) {
+				const result = await reader.read();
+				if (result.done) return resolve();
+				bytesReceived += result.value.length;
+				if (progress && !progress(bytesReceived, cacheObj.size)) {
+					controller.abort();
+					return reject({});
+				}
+			}
+		});
+
+		return Promise.all([cacheWrite, progressWatch])
+		// Add to database
+		.then(db_access)
+		.then(function() {
+			var dbVideos = db_database.transaction("videos", "readwrite").objectStore("videos");
+			return new Promise (function (resolve, reject) {
+				dbVideos.get(cacheID).onsuccess = function (e) {
+					var cachedVideo = e.target.result || db_currentVideoAsCache();
+					cachedVideo.cache = cacheObj;
+					dbVideos.put(cachedVideo).onsuccess = function () { resolve(cacheObj); };
+					db_requestPersistence();
+				};
+			});
+		})
 	});
 }
-
 function db_deleteCachedStream (cacheID) {
 	return window.caches.open("flagplayer-media")
 	.then (function (cache) {
@@ -1304,6 +1360,9 @@ function db_deleteCachedStream (cacheID) {
 		});
 		return Promise.all([cacheWrite, databaseWrite]);
 	});
+}
+function db_getCacheSize() {
+	return (db_cachedVideos ||[]).reduce(function(sum, vid) { return sum + parseInt(vid.cache.size); }, 0);
 }
 
 //endregion
@@ -1511,18 +1570,21 @@ function yt_selectThumbnail (thumbnails) {
 	return url;
 }
 function yt_parseDateText (dateText) {
+	dateText = dateText || "";
 	var usMatch = dateText.match(/([a-zA-Z]+\s*[0-9]+\s*,\s*[0-9]{4})/);
 	if (usMatch) return new Date(usMatch[1]);
 	var euMatch = dateText.match(/([0-9]{2})\.([0-9]{2})\.([0-9]{4})/);
 	if (euMatch) return new Date(parseInt(euMatch[3]), parseInt(euMatch[2])-1, parseInt(euMatch[1]));
 }
 function yt_parseLabel (label) {
-	return label.runs? label.runs[0].text : label.simpleText;
+	label = label || {};
+	return (label.runs? label.runs[0].text : label.simpleText) || "";
 }
 function yt_parseText (text) {
-	return text.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+	return (text || "").replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function yt_parseFormattedRuns(runs) {
+	runs = runs || [];
 	//return runs.map(r => r.bold? ("**" + r.text + "**") : (r.italic? ("*" + r.text + "*") : r.text)).join("");
 	var text = "";
 	for (var i = 0; i < runs.length; i++) {
@@ -1566,8 +1628,8 @@ function yt_parseAJAXVideo (vdData) {
 		categoryID: vdData.category_id,
 	};
 }
-function yt_loadListData(addElements, initialLoad, supressLoader) {
-	return function (pagedContent) { 
+function yt_loadListData(addElements, initialLoad, finished, supressLoader) {
+	return function (pagedContent) {
 		var requestURL = HOST_YT + "/list_ajax?action_get_list=1&style=json&list=" + pagedContent.data.listID + "&index=" + pagedContent.index;
 		PAGED_REQUEST(pagedContent, "GET", requestURL, false, function(listData) {
 			// Parsing
@@ -1589,8 +1651,10 @@ function yt_loadListData(addElements, initialLoad, supressLoader) {
 			addElements(pagedContent.container, pagedContent.data.videos, lastVideoCount);
 
 			// Finish
-			pagedContent.index = pagedContent.index + 100;
-			return pagedContent.data.videos.length > lastVideoCount;
+			var done = pagedContent.data.videos.length == lastVideoCount && pagedContent.index != 100;
+			if (done && finished) finished();
+			if (!done) pagedContent.index = pagedContent.index + 100;
+			return !done;
 		}, supressLoader);
 	};
 }
@@ -1612,18 +1676,18 @@ function yt_loadPlaylistData() {
 		yt_playlist.author = yt_playlist.lastPage.author; 
 		yt_playlist.views = yt_playlist.lastPage.views; 
 		yt_playlist.description = yt_parseText(yt_playlist.lastPage.description);
-		yt_playlist.thumbID = yt_playlist.videos[0].videoID;
+		yt_playlist.thumbID = (yt_playlist.videos[0] || {}).videoID;
 	};
 	var addElements = function (container, videos, prevVidCount) {
 		ui_addToPlaylist(prevVidCount);
-		if (yt_playlist.videos.length == prevVidCount) {
-			console.log("YT Playlist:", yt_playlist);
-			ui_setPlaylistFinished ();
-			yt_playlist.count = yt_playlist.videos.length;
-			if (yt_playlistLoaded) yt_playlistLoaded();
-		}
 	};
-	ct_registerPagedContent("PL", ht_playlistVideos, yt_loadListData(addElements, initialLoad, true), true, yt_playlist).index = 100;
+	var finished = function (container, videos) {
+		console.log("YT Playlist:", yt_playlist);
+		ui_setPlaylistFinished ();
+		yt_playlist.count = yt_playlist.videos.length;
+		if (yt_playlistLoaded) yt_playlistLoaded();
+	};
+	ct_registerPagedContent("PL", ht_playlistVideos, yt_loadListData(addElements, initialLoad, finished, true), true, yt_playlist);
 	ct_checkPagedContent();
 }
 
@@ -1693,15 +1757,9 @@ function yt_loadChannelData(id, background) {
 		if (!background) yt_page = page;
 		channel.meta = yt_extractChannelMetadata(page.initialData);
 		channel.uploads = yt_extractChannelUploads(page.initialData);
-		if (!background) {
-			// Fill UI and setup paged content loaders
-			ui_setChannelMetadata();
-			ui_setupChannelTabs();
-			// Browse tabs need to load first to get continuation data - wait and then update UI
-			channel.uploads.loadingTabs.forEach(function (tabLoader) {
-				tabLoader.then(ui_fillChannelTab);
-			});
-		}
+		return page;
+	}).then (function (page) {
+		return { channel: channel, page: page };
 	});
 }
 function yt_extractChannelMetadata(initialData) {
@@ -1780,16 +1838,26 @@ function yt_extractChannelPageTabs (initialData) {
 	var videoTab = tabs.find(t => t.tabRenderer.selected == true).tabRenderer; // Language-indifferent - relies on /videos/ URL - could use title=="Videos"
 	
 	var tabs = [];
-	var handleContainer = function (c) {
-		var tab = {};
+	var handleContainer = function (tab, c) {
 		if (c.sectionListRenderer) { // Usually base container with multiple itemSectionRenderers
-			c.sectionListRenderer.contents.forEach(handleContainer);
+			var listContent;
+			if (c.sectionListRenderer.subMenu) {
+				var sub = c.sectionListRenderer.subMenu.channelSubMenuRenderer;
+				if (sub.playAllButton) {
+					var play = sub.playAllButton.buttonRenderer.navigationEndpoint;
+					listContent = { // Associated list
+						listID: play.watchPlaylistEndpoint.playlistId,
+						itctToken: play.clickTrackingParams,
+					};
+				}
+			}
+			c.sectionListRenderer.contents.forEach(s => handleContainer({ listContent: listContent }, s));
 			return;
 		}
 		else if (c.itemSectionRenderer) { // Usually container with one ShelfRenderer
 			var s = c.itemSectionRenderer.contents[0];
 			if (!c.itemSectionRenderer.continuations && (s.shelfRenderer || s.verticalListRenderer || s.horizontalListRenderer || s.gridRenderer)) {
-				c.itemSectionRenderer.contents.forEach(handleContainer);
+				c.itemSectionRenderer.contents.forEach(s => handleContainer(tab, s));
 				return;
 			}
 			// It directly contains videos
@@ -1837,7 +1905,7 @@ function yt_extractChannelPageTabs (initialData) {
 		tab.id = tab.title.toLowerCase().replace(/\s/g, "-");
 		tabs.push(tab);
 	};
-	handleContainer(videoTab.content);
+	handleContainer({}, videoTab.content);
 	return tabs;
 }
 function yt_loadChannelPageUploads(pagedContent) {
@@ -1931,23 +1999,12 @@ function yt_loadVideoData(id, background) {
 
 		// Extract metadata
 		video.meta = yt_extractVideoMetadata(page);
-		//if (!background) ui_setVideoMetadata();
 
 		if (!video.blocked) {
-			//if (!background) ui_setupMediaSession();
 			// Extract related videos
 			video.related = yt_extractRelatedVideoData(page.initialData);
-			//if (!background) ui_addRelatedVideos(0);
 			// Extract comments
 			video.comments = yt_extractVideoCommentData(page.initialData);
-			// Setup paged content loaders
-			/*if (!background) {
-				if (video.related.conToken && ct_isAdvancedCorsHost)
-					ct_registerPagedContent("RV", I("relatedContainer"), yt_loadMoreRelatedVideos, ct_isDesktop? 100 : false, video.related);
-				if (video.comments.conToken && ct_isAdvancedCorsHost && ct_pref.loadComments)
-					ct_registerPagedContent("CM", I("vdCommentList"), yt_loadMoreComments, 100, video.comments);
-				ct_checkPagedContent();
-			}*/
 			// Extract and decode stream data
 			return yt_decodeStreams(page.config)
 			.then (function (streams) {
@@ -1982,7 +2039,7 @@ function yt_extractVideoMetadata(page, video) {
 		};
 		meta.allowRatings = videoDetail.allowRatings;
 		
-	} catch (e) { console.error("Failed to read primary video metadata!", e, videoDetail); }
+	} catch (e) { console.error("Failed to read primary video metadata!", e, page.config.args.player_response); }
 
 	if (!page.initialData) {
 		console.warn("Can't extract video metadata without initial data!", page);
@@ -2300,12 +2357,12 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 				}
 				comments.push(comment);
 			});
-		} catch (e) { console.error("Failed to extract comments!", e, data); }
+		} catch (e) { console.error("Failed to extract comments!", e, commentData); }
 	}
 
 	try {
 		commentData.conToken = contents.continuations? contents.continuations[0].nextContinuationData.continuation : undefined;
-	} catch (e) { console.error("Failed to extract comment continuation!", e, data); }
+	} catch (e) { console.error("Failed to extract comment continuation!", e, commentData); }
 }
 
 /* ------------------------------------------------- */
@@ -2409,16 +2466,17 @@ function yt_decodeStreams (config) {
 		for (var i = 0; i < streams.length; i++) {
 			// Copy and process data into new stream object
 			var s = streams[i];
-			var stream = {};
-			stream.url = s.url;
-			var itag = stream.itag = s.itag;
+			var stream = { itag: s.itag, url: s.url };
 
-			// ITag Data
-			if (ITAGS[itag] == undefined) {
-				if (itag != undefined)
-					console.error("Unknown stream ITag '" + itag + "' (" + config.args.loaderUrl + ")");
+			// Verify itag
+			var itag = s.itag;
+			if (itag == undefined) continue; // Yes these pop up recently
+			else if (ITAGS[itag] == undefined) {
+				console.error("Unknown stream ITag '" + itag + "' (" + config.args.loaderUrl + ")");
 				continue;
 			}
+
+			// ITag Data
 			stream.isLive = ITAGS[itag].hls || false;
 			stream.isStereo = ITAGS[itag].ss3D || false;
 
@@ -2571,14 +2629,16 @@ function ui_updateSoundState () {
 	I("volumePosition").style.left = (md_pref.muted? 0 : md_pref.volume*100) + "%";
 }
 function ui_updateOptionsState () {
-	setDisplay("optionsPanel", ct_temp.options? "flex" : "none");
+	setDisplay("optionsPanel", ct_temp.options? "" : "none");
 	I("optionsButton").setAttribute("state", ct_temp.options? "on" : "off");
-	I("loopToggle").checked = ct_temp.loop;
+	I("opt_loop").checked = ct_temp.loop;
+	I("opt_autoplay").checked = ct_pref.autoplay;
+	I("opt_plshuffle").checked = ct_pref.playlistRandom;
 }
 function ui_updateStreamState (selectedStreams) {
-	I("legacyStreamToggle").checked = !md_pref.dash;
-	setDisplay("legacyStreamGroup", md_pref.dash? "none" : "block");
-	setDisplay("dashStreamGroup", md_pref.dash? "block" : "none");
+	//I("legacyStreamToggle").checked = !md_pref.dash;
+	setDisplay("legacyStreamGroup", md_pref.dash? "none" : "");
+	setDisplay("dashStreamGroup", md_pref.dash? "" : "none");
 	I("select_dashContainer").value = md_pref.dashContainer;
 	if (selectedStreams) {
 		I("select_dashVideo").value = !selectedStreams.dashAudio? "NONE" : 
@@ -2707,9 +2767,14 @@ function ui_formatText(text) {
 	// Replace newlines with tags
 	text = text.replace(/\n/g, '<br>\n');
 	// URLs starting with http://, https://, or ftp://
-	text = text.replace(/(^|\s|[^\w\/<>])((?:https?|ftp):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gim, '$1<a href="$2">$2</a>');
+//	text = text.replace(/(^|\s|[^\w\/<>])((?:https?|ftp):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gim, '$1<a href="$2">$2</a>');
+	text = text.replace(/(^|\s|[^\w\/<>])((?:https?|ftp):\/\/[-A-Z0-9+&@#\/%?=~_|!:,.;]*[-A-Z0-9+&@#\/%=~_|])/gim, (match, beg, url) => 
+		beg + '<a href="' + url + '">' + decodeURIComponent(url) + '</a>');
 	// URLs starting with "www."
-	text = text.replace(/(^|\s|[^\w\/<>])(?:^|[^\/])(www\.[\S]+(\b|$))/gim, '$1<a href="http://$2">$2</a>');
+//	text = text.replace(/(^|\s|[^\w\/<>])(?:^|[^\/])(www\.[\S]+(\b|$))/gim, '$1<a href="http://$2">$2</a>');
+	text = text.replace(/(^|\s|[^\w\/<>])(?:^|[^\/])(www\.[\S]+(\b|$))/gim, (match, beg, url) => 
+		beg + '<a href="http://' + url + '">' + decodeURIComponent(url) + '</a>');
+
 	// Change email addresses to mailto:: links.
 	text = text.replace(/(^|\s|[^\w\/<>])([a-zA-Z0-9\-\_\.]+@[a-zA-Z\_]+?(?:\.[a-zA-Z]{2,6})+)/gim, '$1<a href="mailto:$2">$2</a>');
 	// Change timestamps to clickable timestamp links.
@@ -2734,20 +2799,21 @@ function ui_formatText(text) {
 
 function ui_openSettings () {
 	setDisplay("settingsPanel", "block");
-	I("st_autoplay").checked = ct_pref.autoplay;
-	I("st_plshuffle").checked = ct_pref.playlistRandom;
 	I("st_theme").value = ct_pref.theme;
+	I("st_small_player").checked = ct_pref.smallPlayer;
 	I("st_related").value = ct_pref.relatedVideos;
-	I("st_corsHost").value = ct_pref.corsAPIHost;
-	I("st_filter_hide").checked = ct_pref.filterHideCompletely;
 	I("st_comments").checked = ct_pref.loadComments;
+	I("st_corsHost").value = ct_pref.corsAPIHost;
 	I("st_cache_quality").value = ct_pref.cacheAudioQuality;
 	I("st_cache_force").checked = ct_pref.cacheForceUse;
-	I("st_small_player").checked = ct_pref.smallPlayer;
-	var filterCats = I("st_filter_categories");
-	ui_fillCategoryFilter(filterCats);
-	filterCats.firstElementChild.innerText = filterCats.countUnselected() + " filtered";
-} 
+	db_getCachedVideos().then(function() {
+		I("st_cache_usage").innerText = ui_shortenBytes(db_getCacheSize()) + " - View All";
+	});
+	db_requestPersistence().then(function(persitence) {
+		if (!persitence)
+			I("st_cache_persistence").style.display = "";
+	});
+}
 function ui_closeSettings () {
 	setDisplay("settingsPanel", "none");
 } 
@@ -2760,11 +2826,13 @@ function ui_closeSettings () {
 function ui_setupHome () {
 	if (ct_page != Page.Home) return;
 	var playlistContainer = I("homePlaylists");
-	playlistContainer.innerHTML = "";
 	db_accessPlaylists().then(function () {
-		db_playlists.forEach(function (pl) {
-			ht_appendPlaylistElement(playlistContainer, pl.listID, pl.thumbID, pl.title, pl.author, pl.count + " videos");
-		});
+		if (db_playlists.length > 0) {
+			playlistContainer.innerHTML = "";
+			db_playlists.forEach(function (pl) {
+				ht_appendPlaylistElement(playlistContainer, pl.listID, pl.thumbID, pl.title, (pl.author || "Autogenerated"), pl.count + " videos");
+			});
+		} // Else just leave the introduction
 		sec_home.style.display = "block";
 	});
 }
@@ -2782,16 +2850,11 @@ function ui_resetHome () {
 function ui_setupCache () {
 	if (ct_page != Page.Cache) return;
 	I("cacheAmount").innerText = db_cachedVideos.length;
-	var bytesUsed = db_cachedVideos.reduce(function(sum, vid) { return sum + parseInt(vid.cache.size); }, 0);
-	if ("storage" in navigator) {
-		navigator.storage.estimate().then(function(estimate) {
-			I("cacheQuota").innerText = ui_shortenBytes(bytesUsed) + " (" + ui_shortenBytes(estimate.usage) + " / " + ui_shortenBytes(estimate.quota) + ")";
-		}).catch(function() { I("cacheQuota").innerText = ui_shortenBytes(bytesUsed); });
-	} else I("cacheQuota").innerText = ui_shortenBytes(bytesUsed);
+	I("cacheUsage").innerText = ui_shortenBytes(db_getCacheSize());
 	var cachedVideoList = I("cacheVideoList");
 	cachedVideoList.innerHTML = "";
 	db_cachedVideos.forEach(function (v) {
-		ht_appendVideoElement(cachedVideoList, undefined, v.videoID, ui_formatTimeText(v.length), v.title, v.uploader.name, ui_shortenBytes(v.cache.size), {
+		ht_appendVideoElement(cachedVideoList, undefined, v.videoID, ui_formatTimeText(v.length), v.title, v.uploader.name, v.cache.quality + "Kbps (" + ui_shortenBytes(v.cache.size) + ")", {
 			class: "cacheVideoContext",
 			entries: ['<span tabindex="0" value="cacheDelete-' + v.videoID + '">Delete Cache</span>'],
 		});
@@ -2825,7 +2888,7 @@ function ui_setStreams () {
 		ui_addDropdownElement(dropdown, "NONE", "None");
 	}
 	// Fill dropdowns with available values
-	var selectableStreams = md_selectableStreams();
+	var selectableStreams = md_selectableStreams(yt_video);
 	fillDropdown(I("select_dashVideo"), selectableStreams.dashVideo.map(function(s) { 
 		return { value: s.vResY*100+s.vFPS, label: s.vResY + "p" + (s.vFPS != 30? "" + s.vFPS : "") }; 
 	}));
@@ -2902,7 +2965,11 @@ function ui_setVideoMetadata() {
 	}
 
 	if (yt_video.loaded && ct_pref.loadComments)
+	{
 		sec_comments.style.display = "block";
+		if (!ct_isDesktop) // can't sort comments on mobile
+			I("commentContextActions").style.display = "none"; 
+	}
 	
 }
 function ui_resetVideoMetadata () {
@@ -3070,18 +3137,18 @@ function ui_setupChannelTabs () {
 	var container = I("chVideoContainer");
 	if (yt_channel.uploads.tabs.length == 1) {
 		var tab = yt_channel.uploads.tabs[0];
-		tab.section = ht_appendFullVideoSection(container, tab.title, tab.id);
+		tab.section = ht_appendFullVideoSection(container, tab.title, tab.id, tab.listContent? tab.listContent.listID : undefined);
 		tab.container = I("f-" + tab.id);
 		tabBar.style.display = "none";
 	} else {
 		ht_appendTabHeader(tabBar, "Overview", "overview").setAttribute("selected", "");
 		yt_channel.uploads.tabs.forEach (function (tab) {
 			tab.tabHeader = ht_appendTabHeader(tabBar, tab.title, tab.id);
-			tab.section = ht_appendFullVideoSection(container, tab.title, tab.id);
+			tab.section = ht_appendFullVideoSection(container, undefined, tab.id, tab.listContent? tab.listContent.listID : undefined);
 			tab.section.style.display = "none";
-			tab.container = I("f-" + tab.id)
-			tab.smallSection = ht_appendCollapsedVideoSection(container, tab.title, tab.id);
-			tab.smallContainer = I("c-" + tab.id)
+			tab.container = I("f-" + tab.id);
+			tab.smallSection = ht_appendCollapsedVideoSection(container, tab.title, tab.id, tab.listContent? tab.listContent.listID : undefined);
+			tab.smallContainer = I("c-" + tab.id);
 		});
 		tabBar.style.display = "flex";
 	}
@@ -3152,7 +3219,7 @@ function ui_setPlaylistFinished () {
 }
 function ui_addToPlaylist (startIndex) {
 	I("plTitle").innerText = yt_playlist.title;
-	I("plDetail").innerText = yt_playlist.author + " - " + yt_playlist.videos.length + " videos";
+	I("plDetail").innerText = (yt_playlist.author || "Autogenerated") + " - " + yt_playlist.videos.length + " videos";
 	ui_removeLoadingIndicator(ht_playlistVideos);
 	if (!startIndex) startIndex = 0;
 	var focusIndex = undefined;
@@ -3201,6 +3268,43 @@ function ui_checkPlaylist () {
 	}, function (index) {
 		ht_clearVideoPlaceholder(ht_playlistVideos.children[index]);
 	});
+}
+
+
+/* -------------------- */
+/* --- UI PLAYLIST ----	*/
+/* -------------------- */
+
+function ui_setNotification(id, text, timeout = undefined) {
+	var not = I(id);
+	if (not) not.notContent.innerHTML = text;
+	else {
+		I("notificationContainer").insertAdjacentHTML ("afterBegin",
+			'<div class="notificationItem" id="' + id + '">' +
+				'<div>' + text + '</div>' +
+				'<div class="flexSpace"></div>' +
+				'<button class="notificationDismiss icon">' +
+					'<svg viewBox="6 6 36 36"><use href="#svg_cross"/></svg>' +
+				'</button>' +
+			'</div>');
+		not = I(id);
+		not.notContent = not.children[0];
+		not.notOnClose = undefined;
+		not.notClose = function() { 
+			if (not.notOnClose) not.notOnClose();
+			if (not.timeout) clearTimeout(not.timeout);
+			I("notificationContainer").removeChild(not);
+		};
+		not.children[2].onclick = not.notClose;
+	}
+	if (not.timeout) clearTimeout(not.timeout);
+	if (timeout != undefined) {
+		not.timout = setTimeout(function() {
+			not.timeout = undefined;
+			not.notClose();
+		}, timeout);
+	}
+	return not;
 }
 
 //endregion
@@ -3400,6 +3504,7 @@ function ui_handleDropdown (dropdown, event) {
 	if (!ui_isInCascade(dropdown, click? document.activeElement : event.relatedTarget, 3)) {
 		dropdown.removeAttribute("toggled"); // Focus not in dropdown - close
 	} else if (click && dropdown.hasAttribute("toggled")) {
+		// Update dropdown selection and trigger callback
 		var close = true;
 		if (dropdown != document.activeElement) {
 			var selected = document.activeElement, steps = 2, onSelect;
@@ -3416,6 +3521,17 @@ function ui_handleDropdown (dropdown, event) {
 		}
 		if (close) dropdown.removeAttribute("toggled");
 	} else {
+		// Adapt dropdown direction based on current scroll
+		var ddRect = dropdown.getBoundingClientRect();
+		var viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+		if (ddRect.bottom > viewportHeight-dropdown.container.childElementCount*39.2*1.1) {
+			dropdown.classList.remove("down");
+			dropdown.classList.add("up");
+		} else {
+			dropdown.classList.remove("up");
+			dropdown.classList.add("down");
+		}
+		// Show and update dropdown
 		dropdown.setAttribute("toggled", "");
 		[].forEach.call(dropdown.options, function (c) {
 			if (c.selected) c.setAttribute("selected", "");
@@ -3574,48 +3690,40 @@ function ui_setupEventHandlers () {
 	I("playButton").onclick = onControlPlay;
 	I("nextButton").onclick = onControlNext;
 	I("muteButton").onclick = onControlMute;
-	I("optionsButton").onclick = onToggleOptions;
+	I("optionsButton").onclick = onOptionsToggle;
 	I("fullscreenButton").onclick = onToggleFullscreen;
 	I("volumeSlider").onchange = onControlVolumeChange;
-	// Options Panel
-	I("select_legacy").onchange = onSelectStreams;
-	I("select_dashContainer").onchange = onSelectStreams;
-	I("select_dashVideo").onchange = onSelectStreams;
-	I("select_dashAudio").onchange = onSelectStreams;
-	I("legacyStreamToggle").onchange = onToggleLegacyStream;
-	I("loopToggle").onchange = onToggleLoop;
 	// Playlist
-	I("plClose").onclick = ct_resetPlaylist;
-	I("plSave").onclick = db_savePlaylist;
 	I("plRemove").onclick = db_removePlaylist;
+	I("plSave").onclick = db_savePlaylist;
 	I("plUpdate").onclick = ct_updatePlaylist;
-	// Context
-	I("videoContextActions").onchange = onSelectContextAction;
-	I("commentContextActions").onchange = onSelectContextAction;
-	I("channelContextActions").onchange = onSelectContextAction;
+	I("plClose").onclick = ct_resetPlaylist;
+	// Options Panel
+	I("select_legacy").onchange = function () { onOptionsChange("ST"); };
+	I("select_dashContainer").onchange = function () { onOptionsChange("ST"); };
+	I("select_dashVideo").onchange = function () { onOptionsChange("ST"); };
+	I("select_dashAudio").onchange = function () { onOptionsChange("ST"); };
+	I("opt_loop").onchange = function () { onOptionsChange("LP"); };
+	I("opt_autoplay").onchange = function () { onOptionsChange("AP"); };
+	I("opt_plshuffle").onchange = function () { onOptionsChange("PS"); };
 	// Settings Panel
 	I("st_theme").onchange = function () { onSettingsChange("TH"); };
-	I("st_autoplay").onchange = function () { onSettingsChange("AP"); };
-	I("st_plshuffle").onchange = function () { onSettingsChange("PS"); };
 	I("st_related").onchange = function () { onSettingsChange("RV"); };
-	I("st_filter_categories").onchange = function () { onSettingsChange("FV"); };
-	I("st_filter_hide").onchange = function () { onSettingsChange("FV"); };
+	//I("st_filter_categories").onchange = function () { onSettingsChange("FV"); };
+	//I("st_filter_hide").onchange = function () { onSettingsChange("FV"); };
 	I("st_comments").onchange = function () { onSettingsChange("CM"); };
 	I("st_corsHost").onchange = function () { onSettingsChange("CH"); };
 	I("st_cache_quality").onchange = function () { onSettingsChange("CC"); };
 	I("st_cache_force").onchange = function () { onSettingsChange("CC"); };
 	I("st_small_player").onchange = function () { onSettingsChange("SP"); };
+	// Context
+	I("videoContextActions").onchange = onSelectContextAction;
+	I("commentContextActions").onchange = onSelectContextAction;
+	I("channelContextActions").onchange = onSelectContextAction;
+	I("searchContextActions").onchange = onSelectContextAction;
 	// Search Bar
 	I("search_categories").onchange = onSearchUpdate;
 	onToggleButton(I("search_hideCompletely"), onSearchUpdate);
-	I("searchContextActions").onchange = onSelectContextAction;
-	// Update Notifications
-	var notifications = document.getElementsByClassName("notificationDismiss");
-	[].forEach.call(notifications, function (d) {
-		d.onclick = function() { d.parentElement.style.display = "none"; };
-	});
-	I("newVersionUpdate").onclick = sw_update;
-	I("seeCacheButton").onclick = function () { setDisplay("cacheStreamPanel", "none"); ct_navCache(); };
 }
 
 //endregion
@@ -3652,7 +3760,7 @@ function onHistoryChange () {
 /* -- BUTTON HANDLERS -	*/
 /* -------------------- */
 
-function onSettingsToggle () {
+function onSettingsToggle() {
 	ct_temp.settings = !ct_temp.settings;
 	if (ct_temp.settings) {
 		//if (md_state == State.Started) // Pause if playing
@@ -3665,12 +3773,6 @@ function onSettingsToggle () {
 }
 function onSettingsChange (hint) {
 	switch (hint) {
-		case "AP": 
-			ct_pref.autoplay = I("st_autoplay").checked;
-			break;
-		case "PS": 
-			ct_pref.playlistRandom = I("st_plshuffle").checked;
-			break;
 		case "CH":
 			ct_pref.corsAPIHost = I("st_corsHost").value;
 			if (!ct_pref.corsAPIHost.endsWith("/")) ct_pref.corsAPIHost += "/";
@@ -3700,7 +3802,33 @@ function onSettingsChange (hint) {
 			ui_updatePageLayout(true);
 			break;
 		default: 
+			return;
+	}
+	ct_savePreferences();
+}
+function onOptionsToggle () {
+	ct_temp.options = !ct_temp.options;
+	ui_updateOptionsState();
+	ui_updateControlBar();
+}
+function onOptionsChange (hint) {
+	switch (hint) {
+		case "ST":
+			md_pref.legacyVideo = I("select_legacy").value;
+			md_pref.dashVideo = I("select_dashVideo").value;
+			md_pref.dashAudio = I("select_dashAudio").value;
+			md_pref.dashContainer = I("select_dashContainer").value;
+			md_updateStreams();
+		case "LP":
+			ct_temp.loop = I("opt_loop").checked;
+		case "AP": 
+			ct_pref.autoplay = I("opt_autoplay").checked;
 			break;
+		case "PS": 
+			ct_pref.playlistRandom = I("opt_plshuffle").checked;
+			break;
+		default:
+			return;
 	}
 	ct_savePreferences();
 }
@@ -3735,41 +3863,16 @@ function onToggleFullscreen () {
 	ct_temp.fullscreen = !ct_temp.fullscreen;
 	ui_updateFullscreenState();
 }
-function onToggleOptions () {
-	ct_temp.options = !ct_temp.options;
-	ui_updateOptionsState();
-	ui_updateControlBar();
-}
-function onToggleLoop() {
-	ct_temp.loop = !ct_temp.loop;
-	ui_updateOptionsState();
-}
-function onToggleLegacyStream() {
-	md_pref.dash = !md_pref.dash;
-	ct_savePreferences();
-	md_updateStreams();
-}
-function onSelectStreams () {
-	md_pref.legacyVideo = I("select_legacy").value;
-	md_pref.dashVideo = I("select_dashVideo").value;
-	md_pref.dashAudio = I("select_dashAudio").value;
-	md_pref.dashContainer = I("select_dashContainer").value;
-	ct_savePreferences();
-	md_updateStreams();
-}
 function onSelectContextAction (selectedValue, dropdownElement, selectedElement) {
 	var selectedValue = selectedValue || "";
 	if (selectedValue == "cmTop") yt_loadTopComments();
 	else if (selectedValue == "cmNew") yt_loadNewComments();
-	else if (selectedValue == "cache") 
-		db_cacheStream()
-		.then(function() { setDisplay("cacheStreamPanel", ""); })
-		.catch(function(){ console.error("Failed to cache audio stream!"); });
-	else if (selectedValue == "downloadAudio" && yt_video && yt_video.ready)
-		window.open(md_selectStream(md_selectableStreams().dashAudio, "BEST", md_daVal).url);
-	else if (selectedValue == "downloadVideo" && yt_video && yt_video.ready)
-		window.open(md_selectStream(md_selectableStreams().dashVideo, "BEST", md_dvVal).url);
-	else if (selectedValue == "thumbnailImgLink" && yt_video && yt_video.ready)
+	else if (selectedValue == "cache") ct_cacheVideo(yt_video);
+	else if (selectedValue == "linkAudio" && yt_video && yt_video.ready)
+		window.open(md_selectStream(md_selectableStreams(yt_video).dashAudio, "BEST", md_daVal).url);
+	else if (selectedValue == "linkVideo" && yt_video && yt_video.ready)
+		window.open(md_selectStream(md_selectableStreams(yt_video).dashVideo, "BEST", md_dvVal).url);
+	else if (selectedValue == "linkThumbnail" && yt_video && yt_video.ready)
 		window.open(yt_video.meta.thumbnailURL);
 	else if (selectedValue.startsWith("cacheDelete-"))
 		db_deleteCachedStream(selectedValue.substring(12))
@@ -3822,7 +3925,7 @@ function onMouseClick (mouse) {
 
 	// Handle click outside of fullscreen panel to close it
 	if (mouse.target.classList.contains("fullscreenPanel")) {
-		if (mouse.target.id == "settingsPanel") ui_closeSettings();
+		if (mouse.target.id == "settingsPanel") onSettingsToggle();
 		else mouse.target.style.display = "none";
 		mouse.preventDefault();
 		return;
@@ -3830,7 +3933,7 @@ function onMouseClick (mouse) {
 	
 	// Handle Close Options when clicked outside of opened panel or button
 	if (ct_temp.options && !ui_hasCascadedID(mouse.target, "optionsButton", 3) && !ui_hasCascadedID(mouse.target, "optionsPanel", 4)) {
-		onToggleOptions();
+		onOptionsToggle();
 		overridePlayer = true;
 	}
 	
@@ -3853,6 +3956,8 @@ function onMouseClick (mouse) {
 			nav = nav.parentElement;
 		var match = nav.getAttribute("navigation").match(/^(.*?)=(.*)$/);
 		if (match) {
+			ct_temp.settings = false;
+			ui_closeSettings ();
 			switch (match[1]) {
 				case "v":  ct_navVideo(match[2]); break;
 				case "u": ct_navChannel({ user: match[2] }); break;
@@ -3860,6 +3965,11 @@ function onMouseClick (mouse) {
 				case "q": ct_navSearch(match[2]); break;
 				case "list": ct_loadPlaylist(match[2]); break;
 				case "tab": onBrowseTab(match[2]); break;
+				case "view": 
+					ct_beforeNav();
+					ct_view = match[2];
+					ct_performNav();
+					break;
 				default: break;
 			}
 		}
@@ -3932,6 +4042,7 @@ function onKeyDown (keyEvent) {
 			onControlPrev();
 			break;
 		default:
+			pass = true;
 			break;
 		}	
 	} else if (keyEvent.ctrlKey) {
@@ -4059,17 +4170,17 @@ function md_dvVal (s) { return (s.vResY * 100 + s.vFPS) * 2 + (s.container == md
 function md_daVal (s) { return s.aBR; }
 function md_lvVal (s) { return s.vResY; }
 
-function md_selectableStreams () {
-	if (!yt_video || !yt_video.ready) return undefined;
+function md_selectableStreams (video) {
+	if (!video || !video.ready) return undefined;
 	// Return streams available in each category sorted from best to worst
 	var streams = {};
-	streams.dashVideo = yt_video.streams
+	streams.dashVideo = video.streams
 		.filter(s => !s.unavailable && s.isDash && s.hasVideo && videoMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_dvVal(s1) > md_dvVal(s2)? -1 : 1);
-	streams.dashAudio = yt_video.streams
+	streams.dashAudio = video.streams
 		.filter(s => !s.unavailable && s.isDash && s.hasAudio && audioMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_daVal(s1) > md_daVal(s2)? -1 : 1);
-	streams.legacyVideo = yt_video.streams
+	streams.legacyVideo = video.streams
 		.filter(s => !s.unavailable && !s.isDash && videoMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_daVal(s1) > md_daVal(s2)? -1 : 1);
 	return streams;
@@ -4082,10 +4193,10 @@ function md_selectStream (s, pref, value, sec) { // SECondary selector, f.E. con
 		return sec && value(s[s.length-2]) == value(s[s.length-1])+1? s[s.length-2] : s[s.length-1];
 	return s.find(s1 => value(s1) <= (sec? parseInt(pref)*2+1 : parseInt(pref))) || s[s.length-1];
 }
-function md_selectStreams () {
-	if (!yt_video || !yt_video.ready) return undefined;
+function md_selectStreams (video) {
+	if (!video || !video.ready) return undefined;
 	// Return the selected stream in each category according to preferences
-	var allStreams = md_selectableStreams();
+	var allStreams = md_selectableStreams(video);
 	var streams = {};
 	streams.dashVideo = md_selectStream(allStreams.dashVideo, md_pref.dashVideo, md_dvVal, true);
 	streams.dashAudio = md_selectStream(allStreams.dashAudio, md_pref.dashAudio, md_daVal);
@@ -4104,7 +4215,7 @@ function md_updateStreams ()  {
 		media.load();
 	}
 	// Read selected streams from UI
-	var selectedStreams = md_selectStreams();
+	var selectedStreams = md_selectStreams(yt_video);
 	md_sources = {};
 	if (md_pref.dash) {
 		md_sources.video = selectedStreams.dashVideo? selectedStreams.dashVideo.url : '';
@@ -4523,14 +4634,14 @@ function ht_appendVideoElement (container, index, id, length, prim, sec, tert, c
 (index == undefined?	'' :
 			'<div class="liIndex">' + index + '</div>') + 
 			'<a class="liThumbnail" navigation="v=' + id + '" href="' + ct_getNavLink("v=" + id) + '">' + 
-				'<img class="liThumbnailImg" src="' + HOST_YT_IMG +  id + '/default.jpg">' +
-				'<span class="liThumbnailInfo"> ' +  length + ' </span>' +
+				'<img class="liThumbnailImg" src="' + HOST_YT_IMG +  id + '/default.jpg" nav>' +
+				'<span class="liThumbnailInfo" nav> ' +  length + ' </span>' +
 			'</a>' + 
 			'<a class="liDetail" navigation="v=' + id + '" href="' + ct_getNavLink("v=" + id) + '">' + 
-				'<span class="twoline liPrimary">' + prim + '</span>' +
-				'<span class="oneline liSecondary">' + sec + '</span>' +
+				'<span class="twoline liPrimary" nav>' + prim + '</span>' +
+				'<span class="oneline liSecondary" nav>' + sec + '</span>' +
 (tert == undefined?	'' :
-				'<span class="oneline liTertiary">' + tert + '</span>') +
+				'<span class="oneline liTertiary" nav>' + tert + '</span>') +
 			'</a>' + 
 (contextData == undefined? '' :
 			'<button class="liAction script dropdown left ' + (contextData.class || '') + '" id="' + (contextData.id || '') + '">' + 
@@ -4565,18 +4676,20 @@ function ht_appendTabHeader (container, label, id) {
 		'<button class="tabHeader" id="h-' + id + '" navigation="tab=' + id +  '">' + label + '</button>');
 	return container.lastElementChild;
 }
-function ht_appendCollapsedVideoSection (container, label, id) {
+function ht_appendCollapsedVideoSection (container, label, id, listID) {
 	container.insertAdjacentHTML ("beforeEnd",
 		'<div class="videoSection">' +
 			'<button class="videoSectionHeader" navigation="tab=' + id +  '">' + label + '</button>' +
+(!listID? "" : '<a class="videoSectionLabel" navigation="list=' + listID + '" href="' + ct_getNavLink("list=" + listID) + '">Play All</a>') +
 			'<div class="videoList" id="c-' + id + '"></div>' +
 		'</div>');
 	return container.lastElementChild;
 }
-function ht_appendFullVideoSection (container, label, id) {
+function ht_appendFullVideoSection (container, label, id, listID) {
 	container.insertAdjacentHTML ("beforeEnd",
 		'<div class="videoSection">' +
-			//'<div class="videoSectionLabel">' + label + '</div>' +
+(!label? "" : '<span class="videoSectionLabel">' + label + '</span>') +
+(!listID? "" : '<a class="videoSectionLabel" navigation="list=' + listID + '" href="' + ct_getNavLink("list=" + listID) + '">Play All</a>') +
 			'<div class="videoList" id="f-' + id + '"></div>' +
 		'</div>');
 	return container.lastElementChild;

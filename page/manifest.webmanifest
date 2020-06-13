@@ -1,0 +1,40 @@
+{
+  "lang": "en",
+  "name": "FlagPlayer",
+  "short_name": "FlagPlayer",
+  "description": "A music-oriented YouTube web-app",
+  "display": "standalone",
+  "icons": [
+    {
+      "src": "favicon-16.png",
+      "sizes": "16x16",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon-32.png",
+      "sizes": "32x32",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon-96.png",
+      "sizes": "96x96",
+      "type": "image/png"
+    },
+    {
+      "src": "favicon-192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    }
+  ],
+  "theme_color": "rgb(40,40,40)",
+  "background_color": "rgb(40,40,40)",
+  "categories": "music entertainment",
+  "start_url": "/",
+  "shortcuts": [
+    {
+      "name": "Cached Videos",
+      "description": "List all locally cached audio streams",
+      "url": "/?view=cache"
+    }
+  ]
+}
