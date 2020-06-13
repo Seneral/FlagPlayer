@@ -257,7 +257,11 @@ function sw_install () {
 				console.log("Found new service worker version!");
 				var update = function () {
 					sw_updated = registration.waiting || registration.active;
-					setDisplay("newVersionPanel", "");
+					var not = ui_setNotification("newVersionPanel", 'A new version is available! <button>Update now</button>');
+					not.children[0].onclick = function() {
+						sw_updated.postMessage({ action: "skipWaiting" });
+						not.notClose();
+					};
 					console.log("New service worker version ready for activation!");
 				};
 				var installing = registration.installing;
@@ -276,11 +280,6 @@ function sw_install () {
 		});
 	}
 }
-function sw_update () { 
-	sw_updated.postMessage({ action: "skipWaiting" });
-	setDisplay("newVersionPanel", "none");
-}
-
 
 /* -------------------------------------------------------------------------------------------------------------- */
 /* ----------------- CONTROL FUNCTIONS -------------------------------------------------------------------------- */
@@ -573,14 +572,32 @@ function ct_navCache () {
 }
 
 function ct_loadCache () {
-	db_getCachedVideos()
-	.then (function (cachedVideos) {
-		db_cachedVideos = cachedVideos;
-		ui_setupCache();
-	}).catch (function() {
-
+	db_getCachedVideos().then(ui_setupCache);
+	db_requestPersistence().then(function(persistence) {
+		if (!persistence) I("cachePersistence").style.display = "";
 	});
+}
 
+function ct_cacheVideo(video) {
+	if (I(notID) != undefined) return; // Already started
+	var videoID = video.videoID;
+	var notID = 'cache-' + videoID;
+	var abort = false;
+	ui_setNotification(notID, "Caching " + videoID + "...").notOnClose = function() { abort = true; };
+	db_cacheStream(video, function(bytesReceived, bytesTotal) {
+		if (abort) return false;
+		ui_setNotification(notID, 'Caching ' + videoID + ': ' + ui_shortenBytes(bytesReceived) + '/' + ui_shortenBytes(bytesTotal) + '');
+		return true;
+	}).then(function(cache) { 
+		var not = ui_setNotification(notID, 'Caching ' + videoID + ': ' + ui_shortenBytes(cache.size) + ' - ' +
+			'<button id="seeCacheButton">View Cache</button>', 3000);
+		not.notContent.children[0].onclick = function () { not.notClose(); ct_navCache(); };
+		video.cache = cache;
+		// In case current view is cache, update the view
+		db_getCachedVideos().then(ui_setupCache);
+	}).catch(function(e) {
+		if (!abort) ui_setNotification(notID, 'Caching ' + videoID + ': Error: ' + (e? e.message : "unknown"));
+	});
 }
 
 
@@ -637,7 +654,7 @@ function ct_getVideoPlIndex () { // Return -1 on fail so that pos+1 will be 0
 
 function ct_navSearch(searchTerms) {
 	var plMatch = searchTerms.match(/(PL[a-zA-Z0-9_-]{32})/) || searchTerms.match(/list=([a-zA-Z0-9_-]{20,})(?:&|$)/) || searchTerms.match(/^([A-Z]{2}[a-zA-Z0-9_-]{20,})$/);
-	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/);
+	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/) || searchTerms.match(/^([a-zA-Z0-9_-]{11})$/);
 	if (plMatch) ct_loadPlaylist(plMatch[1]);
 	if (!plMatch || vdMatch) {
 		ct_beforeNav();
@@ -868,13 +885,15 @@ function ct_mediaError (error) {
 	clearTimeout(md_timerCheckBuffering);
 	if (error instanceof MDError && error.tag && error.tag.src.startsWith(VIRT_CACHE)) {
 		console.error("Cached media file erroneous! Removing from cache. ", error);
+		md_resetStreams();
 		db_deleteCachedStream(yt_videoID).then (function () {
 			if (ct_online) { // Load source
 				md_updateStreams();
 				ui_updateStreamState();
 			} else ct_startAutoplay(8);
 		});
-		error.minor = true; // assume minor
+		ui_setNotification("vd-" + yt_videoID, 'Cache of ' + yt_videoID + ' is invalid, removed entry!', 5000);
+		return;
 	} else if (error instanceof MDError && error.code == 4) {
 		console.error("Can't play selected stream!");
 		var stream = yt_video.streams.find(s => s.url == error.tag.src);
@@ -1004,13 +1023,17 @@ function ct_stopAutoplay () {
 
 function db_requestPersistence() {
 	if ("storage" in navigator && "persist" in navigator.storage) {
-		return navigator.storage.persist()
-		.then(function(success) {
-			if (!success) console.warning("Failed to request persistant storage - playlists and cached videos may be deleted by browser at any point!");
-			return success;
+		return navigator.storage.persisted()
+		.then(function(persisted) {
+			if (persisted) return true;
+			return navigator.storage.persist()
+			.then(function(success) {
+				if (!success) console.warn("Failed to request persistant storage - playlists and cached videos may be deleted by browser at any point!");
+				return success;
+			});
 		});
 	} else {
-		return Promise.reject();
+		return false;
 	}
 }
 function db_access () {
@@ -1245,66 +1268,80 @@ function db_getCachedVideos () {
 						cachedVideos.push(e.target.result.value);
 					e.target.result.continue();
 				} else {
+					db_cachedVideos = cachedVideos;
 					resolve(cachedVideos);
 				}
 			};
 		});
 	});
 }
-function db_cacheStream () {
-	if (!yt_video.ready) return Promise.reject();
-	if (!md_sources || !md_sources.audio) return Promise.reject();
-	if (!("serviceWorker" in navigator) || !sw_current) {
-		console.error("Service Worker required in order to cache videos!");
-		return Promise.reject();
-	}
+function db_cacheStream (video, progress) {
+	if (!video.ready) return Promise.reject({ message: "Video not ready!" });
+	if (!("serviceWorker" in navigator) || !sw_current) return Promise.reject({ message: "No Service Worker - reload!"});
 
-	var cacheID = yt_video.videoID;
-	var stream = md_selectStream(md_selectableStreams().dashAudio, ct_pref.cacheAudioQuality, md_daVal);
+	var cacheID = video.videoID;
+	var stream = md_selectStream(md_selectableStreams(video).dashAudio, ct_pref.cacheAudioQuality, md_daVal);
 	var cacheObj = { 
 		url: VIRT_CACHE + cacheID,
-		quality: ct_pref.cacheAudioQuality,
+		quality: stream.aBR,
 		itag: stream.itag,
 	};
+	var controller = new AbortController();
 
-	return window.caches.open("flagplayer-media")
-	.then (function (cache) {
-		return fetch(ct_pref.corsAPIHost + stream.url, { headers: { "range": "bytes=0-" } })
-		.then(function(response) {
-			if (!response.ok)
-				return Promise.reject(new NetworkError ("Failed to cache - response " + response.statusText));
+	return fetch(ct_pref.corsAPIHost + stream.url, { headers: { "range": "bytes=0-" }, signal: controller.signal })
+	.then(function(response) {
+		if (!response.ok)
+			return Promise.reject(new NetworkError (response.statusText));
 
-			cacheObj.size = parseInt(response.headers.get("content-length"));
-			console.log("Downloaded video stream! Size: " + ui_shortenBytes(cacheObj.size));
-			
-			// Add to cache
-			var cacheWrite = cache.put(cacheObj.url, new Response(response.body, {
+		cacheObj.size = parseInt(response.headers.get("content-length"));
+		if (progress && !progress(0, cacheObj.size)) {
+			controller.abort();
+			return Promise.reject({ message: "Aborted!" });
+		}
+
+		// Split stream to cache and progress streams
+		var dataStreams = response.body.tee();
+		
+		// Add to cache
+		var cacheWrite = window.caches.open("flagplayer-media")
+		.then(function(cache) {
+			return cache.put(cacheObj.url, new Response(dataStreams[0], {
 				status: 200,
 				headers: {
 					"content-length": response.headers.get("content-length"),
 					"content-type": response.headers.get("content-type"),
 				},
 			}));
-
-			// Add to database
-			var databaseWrite = db_access().then(function () {
-				var dbVideos = db_database.transaction("videos", "readwrite").objectStore("videos");
-				return new Promise (function (resolve, reject) {
-					dbVideos.get(cacheID).onsuccess = function (e) {
-						var cachedVideo;
-						if (e.target.result)
-							cachedVideo = e.target.result;
-						else // In case current video was never cached
-							cachedVideo = db_currentVideoAsCache();
-						cachedVideo.cache = cacheObj;
-						dbVideos.put(cachedVideo).onsuccess = resolve;
-						db_requestPersistence();
-					};
-				});
-			});
-
-			return Promise.all([cacheWrite, databaseWrite]);
 		});
+
+		var progressWatch = new Promise(async function(resolve, reject) {
+			const reader = dataStreams[1].getReader();
+			let bytesReceived = 0;
+			while (true) {
+				const result = await reader.read();
+				if (result.done) return resolve();
+				bytesReceived += result.value.length;
+				if (progress && !progress(bytesReceived, cacheObj.size)) {
+					controller.abort();
+					return reject({});
+				}
+			}
+		});
+
+		return Promise.all([cacheWrite, progressWatch])
+		// Add to database
+		.then(db_access)
+		.then(function() {
+			var dbVideos = db_database.transaction("videos", "readwrite").objectStore("videos");
+			return new Promise (function (resolve, reject) {
+				dbVideos.get(cacheID).onsuccess = function (e) {
+					var cachedVideo = e.target.result || db_currentVideoAsCache();
+					cachedVideo.cache = cacheObj;
+					dbVideos.put(cachedVideo).onsuccess = function () { resolve(cacheObj); };
+					db_requestPersistence();
+				};
+			});
+		})
 	});
 }
 function db_deleteCachedStream (cacheID) {
@@ -1527,7 +1564,7 @@ function yt_parseNum (numText) {
 	return num;
 }
 function yt_selectThumbnail (thumbnails) {
-	var url = (thumbnails || []).sort(function(t1, t2) { return t1.height > t2.height? -1 : 1 })[0].url;
+	var url = thumbnails.sort(function(t1, t2) { return t1.height > t2.height? -1 : 1 })[0].url;
 	if (url.startsWith("//"))
 		return "https:" + url;
 	return url;
@@ -1540,7 +1577,8 @@ function yt_parseDateText (dateText) {
 	if (euMatch) return new Date(parseInt(euMatch[3]), parseInt(euMatch[2])-1, parseInt(euMatch[1]));
 }
 function yt_parseLabel (label) {
-	return ((label || {}).runs? label.runs[0].text : label.simpleText) || "";
+	label = label || {};
+	return (label.runs? label.runs[0].text : label.simpleText) || "";
 }
 function yt_parseText (text) {
 	return (text || "").replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -2768,9 +2806,12 @@ function ui_openSettings () {
 	I("st_corsHost").value = ct_pref.corsAPIHost;
 	I("st_cache_quality").value = ct_pref.cacheAudioQuality;
 	I("st_cache_force").checked = ct_pref.cacheForceUse;
-	db_getCachedVideos().then(function(cachedVideos) {
-		db_cachedVideos = cachedVideos;
-		I("st_cache_usage").innerText = ui_shortenBytes(db_getCacheSize());
+	db_getCachedVideos().then(function() {
+		I("st_cache_usage").innerText = ui_shortenBytes(db_getCacheSize()) + " - View All";
+	});
+	db_requestPersistence().then(function(persitence) {
+		if (!persitence)
+			I("st_cache_persistence").style.display = "";
 	});
 }
 function ui_closeSettings () {
@@ -2847,7 +2888,7 @@ function ui_setStreams () {
 		ui_addDropdownElement(dropdown, "NONE", "None");
 	}
 	// Fill dropdowns with available values
-	var selectableStreams = md_selectableStreams();
+	var selectableStreams = md_selectableStreams(yt_video);
 	fillDropdown(I("select_dashVideo"), selectableStreams.dashVideo.map(function(s) { 
 		return { value: s.vResY*100+s.vFPS, label: s.vResY + "p" + (s.vFPS != 30? "" + s.vFPS : "") }; 
 	}));
@@ -2924,7 +2965,11 @@ function ui_setVideoMetadata() {
 	}
 
 	if (yt_video.loaded && ct_pref.loadComments)
+	{
 		sec_comments.style.display = "block";
+		if (!ct_isDesktop) // can't sort comments on mobile
+			I("commentContextActions").style.display = "none"; 
+	}
 	
 }
 function ui_resetVideoMetadata () {
@@ -3225,6 +3270,43 @@ function ui_checkPlaylist () {
 	});
 }
 
+
+/* -------------------- */
+/* --- UI PLAYLIST ----	*/
+/* -------------------- */
+
+function ui_setNotification(id, text, timeout = undefined) {
+	var not = I(id);
+	if (not) not.notContent.innerHTML = text;
+	else {
+		I("notificationContainer").insertAdjacentHTML ("afterBegin",
+			'<div class="notificationItem" id="' + id + '">' +
+				'<div>' + text + '</div>' +
+				'<div class="flexSpace"></div>' +
+				'<button class="notificationDismiss icon">' +
+					'<svg viewBox="6 6 36 36"><use href="#svg_cross"/></svg>' +
+				'</button>' +
+			'</div>');
+		not = I(id);
+		not.notContent = not.children[0];
+		not.notOnClose = undefined;
+		not.notClose = function() { 
+			if (not.notOnClose) not.notOnClose();
+			if (not.timeout) clearTimeout(not.timeout);
+			I("notificationContainer").removeChild(not);
+		};
+		not.children[2].onclick = not.notClose;
+	}
+	if (not.timeout) clearTimeout(not.timeout);
+	if (timeout != undefined) {
+		not.timout = setTimeout(function() {
+			not.timeout = undefined;
+			not.notClose();
+		}, timeout);
+	}
+	return not;
+}
+
 //endregion
 
 
@@ -3422,6 +3504,7 @@ function ui_handleDropdown (dropdown, event) {
 	if (!ui_isInCascade(dropdown, click? document.activeElement : event.relatedTarget, 3)) {
 		dropdown.removeAttribute("toggled"); // Focus not in dropdown - close
 	} else if (click && dropdown.hasAttribute("toggled")) {
+		// Update dropdown selection and trigger callback
 		var close = true;
 		if (dropdown != document.activeElement) {
 			var selected = document.activeElement, steps = 2, onSelect;
@@ -3438,6 +3521,17 @@ function ui_handleDropdown (dropdown, event) {
 		}
 		if (close) dropdown.removeAttribute("toggled");
 	} else {
+		// Adapt dropdown direction based on current scroll
+		var ddRect = dropdown.getBoundingClientRect();
+		var viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+		if (ddRect.bottom > viewportHeight-dropdown.container.childElementCount*39.2*1.1) {
+			dropdown.classList.remove("down");
+			dropdown.classList.add("up");
+		} else {
+			dropdown.classList.remove("up");
+			dropdown.classList.add("down");
+		}
+		// Show and update dropdown
 		dropdown.setAttribute("toggled", "");
 		[].forEach.call(dropdown.options, function (c) {
 			if (c.selected) c.setAttribute("selected", "");
@@ -3630,13 +3724,6 @@ function ui_setupEventHandlers () {
 	// Search Bar
 	I("search_categories").onchange = onSearchUpdate;
 	onToggleButton(I("search_hideCompletely"), onSearchUpdate);
-	// Notifications
-	var notifications = document.getElementsByClassName("notificationDismiss");
-	[].forEach.call(notifications, function (d) {
-		d.onclick = function() { d.parentElement.style.display = "none"; };
-	});
-	I("newVersionUpdate").onclick = sw_update;
-	I("seeCacheButton").onclick = function () { setDisplay("cacheStreamPanel", "none"); ct_navCache(); };
 }
 
 //endregion
@@ -3673,7 +3760,7 @@ function onHistoryChange () {
 /* -- BUTTON HANDLERS -	*/
 /* -------------------- */
 
-function onSettingsToggle () {
+function onSettingsToggle() {
 	ct_temp.settings = !ct_temp.settings;
 	if (ct_temp.settings) {
 		//if (md_state == State.Started) // Pause if playing
@@ -3780,14 +3867,11 @@ function onSelectContextAction (selectedValue, dropdownElement, selectedElement)
 	var selectedValue = selectedValue || "";
 	if (selectedValue == "cmTop") yt_loadTopComments();
 	else if (selectedValue == "cmNew") yt_loadNewComments();
-	else if (selectedValue == "cache") 
-		db_cacheStream()
-		.then(function() { setDisplay("cacheStreamPanel", ""); })
-		.catch(function(){ console.error("Failed to cache audio stream!"); });
+	else if (selectedValue == "cache") ct_cacheVideo(yt_video);
 	else if (selectedValue == "linkAudio" && yt_video && yt_video.ready)
-		window.open(md_selectStream(md_selectableStreams().dashAudio, "BEST", md_daVal).url);
+		window.open(md_selectStream(md_selectableStreams(yt_video).dashAudio, "BEST", md_daVal).url);
 	else if (selectedValue == "linkVideo" && yt_video && yt_video.ready)
-		window.open(md_selectStream(md_selectableStreams().dashVideo, "BEST", md_dvVal).url);
+		window.open(md_selectStream(md_selectableStreams(yt_video).dashVideo, "BEST", md_dvVal).url);
 	else if (selectedValue == "linkThumbnail" && yt_video && yt_video.ready)
 		window.open(yt_video.meta.thumbnailURL);
 	else if (selectedValue.startsWith("cacheDelete-"))
@@ -3872,6 +3956,8 @@ function onMouseClick (mouse) {
 			nav = nav.parentElement;
 		var match = nav.getAttribute("navigation").match(/^(.*?)=(.*)$/);
 		if (match) {
+			ct_temp.settings = false;
+			ui_closeSettings ();
 			switch (match[1]) {
 				case "v":  ct_navVideo(match[2]); break;
 				case "u": ct_navChannel({ user: match[2] }); break;
@@ -3879,6 +3965,11 @@ function onMouseClick (mouse) {
 				case "q": ct_navSearch(match[2]); break;
 				case "list": ct_loadPlaylist(match[2]); break;
 				case "tab": onBrowseTab(match[2]); break;
+				case "view": 
+					ct_beforeNav();
+					ct_view = match[2];
+					ct_performNav();
+					break;
 				default: break;
 			}
 		}
@@ -4079,17 +4170,17 @@ function md_dvVal (s) { return (s.vResY * 100 + s.vFPS) * 2 + (s.container == md
 function md_daVal (s) { return s.aBR; }
 function md_lvVal (s) { return s.vResY; }
 
-function md_selectableStreams () {
-	if (!yt_video || !yt_video.ready) return undefined;
+function md_selectableStreams (video) {
+	if (!video || !video.ready) return undefined;
 	// Return streams available in each category sorted from best to worst
 	var streams = {};
-	streams.dashVideo = yt_video.streams
+	streams.dashVideo = video.streams
 		.filter(s => !s.unavailable && s.isDash && s.hasVideo && videoMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_dvVal(s1) > md_dvVal(s2)? -1 : 1);
-	streams.dashAudio = yt_video.streams
+	streams.dashAudio = video.streams
 		.filter(s => !s.unavailable && s.isDash && s.hasAudio && audioMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_daVal(s1) > md_daVal(s2)? -1 : 1);
-	streams.legacyVideo = yt_video.streams
+	streams.legacyVideo = video.streams
 		.filter(s => !s.unavailable && !s.isDash && videoMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_daVal(s1) > md_daVal(s2)? -1 : 1);
 	return streams;
@@ -4102,10 +4193,10 @@ function md_selectStream (s, pref, value, sec) { // SECondary selector, f.E. con
 		return sec && value(s[s.length-2]) == value(s[s.length-1])+1? s[s.length-2] : s[s.length-1];
 	return s.find(s1 => value(s1) <= (sec? parseInt(pref)*2+1 : parseInt(pref))) || s[s.length-1];
 }
-function md_selectStreams () {
-	if (!yt_video || !yt_video.ready) return undefined;
+function md_selectStreams (video) {
+	if (!video || !video.ready) return undefined;
 	// Return the selected stream in each category according to preferences
-	var allStreams = md_selectableStreams();
+	var allStreams = md_selectableStreams(video);
 	var streams = {};
 	streams.dashVideo = md_selectStream(allStreams.dashVideo, md_pref.dashVideo, md_dvVal, true);
 	streams.dashAudio = md_selectStream(allStreams.dashAudio, md_pref.dashAudio, md_daVal);
@@ -4124,7 +4215,7 @@ function md_updateStreams ()  {
 		media.load();
 	}
 	// Read selected streams from UI
-	var selectedStreams = md_selectStreams();
+	var selectedStreams = md_selectStreams(yt_video);
 	md_sources = {};
 	if (md_pref.dash) {
 		md_sources.video = selectedStreams.dashVideo? selectedStreams.dashVideo.url : '';
@@ -4543,14 +4634,14 @@ function ht_appendVideoElement (container, index, id, length, prim, sec, tert, c
 (index == undefined?	'' :
 			'<div class="liIndex">' + index + '</div>') + 
 			'<a class="liThumbnail" navigation="v=' + id + '" href="' + ct_getNavLink("v=" + id) + '">' + 
-				'<img class="liThumbnailImg" src="' + HOST_YT_IMG +  id + '/default.jpg">' +
-				'<span class="liThumbnailInfo"> ' +  length + ' </span>' +
+				'<img class="liThumbnailImg" src="' + HOST_YT_IMG +  id + '/default.jpg" nav>' +
+				'<span class="liThumbnailInfo" nav> ' +  length + ' </span>' +
 			'</a>' + 
 			'<a class="liDetail" navigation="v=' + id + '" href="' + ct_getNavLink("v=" + id) + '">' + 
-				'<span class="twoline liPrimary">' + prim + '</span>' +
-				'<span class="oneline liSecondary">' + sec + '</span>' +
+				'<span class="twoline liPrimary" nav>' + prim + '</span>' +
+				'<span class="oneline liSecondary" nav>' + sec + '</span>' +
 (tert == undefined?	'' :
-				'<span class="oneline liTertiary">' + tert + '</span>') +
+				'<span class="oneline liTertiary" nav>' + tert + '</span>') +
 			'</a>' + 
 (contextData == undefined? '' :
 			'<button class="liAction script dropdown left ' + (contextData.class || '') + '" id="' + (contextData.id || '') + '">' + 

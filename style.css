@@ -1088,7 +1088,7 @@ button {
 	display: flex;
 	flex-direction: column;
 }
-.notificationPanel {
+.notificationItem {
 	display: flex;
 	line-height: 2em;
 	padding: 0.5em 1em;
@@ -1097,7 +1097,8 @@ button {
 .desktop .notificationContainer {
 	margin: 1em;
 }
-.desktop .notificationPanel {
+.desktop .notificationItem {
+	margin: 0.5em;
 	margin-left: auto;
 	max-width: 40em;
 	max-width: fit-content;
@@ -1142,7 +1143,13 @@ button {
 			  user-select: text; /* Chrome and Opera */
 }
 .freeHeader {
+	line-height: 2em;
 	font-weight: bolder;
+	color: var(--txt-sec-color);
+}
+.freeText {
+	line-height: 1.5em;
+	padding: 0 0.5em;
 	color: var(--txt-sec-color);
 }
 a.freeLink {
