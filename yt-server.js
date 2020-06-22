@@ -1,4 +1,4 @@
-var checkRateLimit = require('./lib/rate-limit')('500 5');
+var checkRateLimit = require('./lib/rate-limit')('5000 5');
 
 originWhitelist = [ 'https://flagplayer.seneral.dev', 'https://www.seneral.dev' ];
 if (process.env.HEROKU_LOCAL) // Only specified in local .env file
