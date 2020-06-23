@@ -162,11 +162,12 @@ var md_paused = true; // Current state or intent
 var md_flags = { buffering: false, seeking: false } // Only valid during State.Started
 var md_isPlaying = function () { return md_sources && md_state == State.Started && !md_paused && !md_flags.buffering && !md_flags.seeking; };
 var md_curTime = 0, md_totalTime = 0;
+var md_errorText = "An Error occured!"; // Error message if md_state == State.Error
 var md_pref = {}; // volume, muted, playlistRandom, autoplay, dash, dashVideo, dashContainer, legacyVideo
 
 /* YOUTUBE CONTENT */
 var yt_url; // URL of respective youtube content
-var yt_page; // cookies {}, secrets {}, initialData {}, playerConfig {}, videoDetail {}, html "", object {}
+var yt_page; // cookies {}, secrets {}, initialData {}, playerConfig {}, videoDetail {}, html "", object {}, unavailable
 	// secrets: csn, xsrfToken, idToken, innertubeAPIKey, clientName, clientVersion, pageCL, pageLabel, variantsChecksum, visitorData, ...
 // Playlist
 var yt_playlistID;
@@ -194,7 +195,6 @@ var yt_channel; // meta {}, upload {}
 	// video: title, videoID, views, length, thumbnailURL uploadedTimeAgoText
 
 /* TEMPORARY STATE */
-var yt_playlistLoaded; // Event triggered when playlist is fully loaded
 var ct_online; // Flag if last request suceeded
 var ct_isAdvancedCorsHost; // Boolean: Supports cookie-passing for (with others) comments
 var ct_traversedHistory; // Prevent messing with history when traversing
@@ -606,33 +606,62 @@ function ct_cacheVideo(video) {
 /* -------------------- */
 
 function ct_loadPlaylist (plID) {
-	if (yt_playlist && (!plID || plID == yt_playlistID)) return;
-	if (plID) yt_playlistID = plID;
+	if (!plID) plID = yt_playlistID;
+	if (yt_playlist && plID == yt_playlistID) return;
+	yt_playlistID = plID;
 	yt_playlist = undefined;
-	if (plID) ui_resetPlaylist(); // usually replacing existing playlist
-	ct_pagePlaylist = true;
+	ui_resetPlaylist();
 	ui_setupPlaylist();
-	db_accessPlaylists().then(function () {
-		if (!db_hasPlaylistSaved(yt_playlistID)) {
-			yt_loadPlaylistData();
-		} else {
-			db_loadPlaylist(function () {
-				ui_addToPlaylist(0);
-				ui_setPlaylistFinished();
-			});
-		}
-	});
+	ct_pagePlaylist = true;
 	ct_updatePageState();
+	db_loadPlaylist(plID)
+	.then(function (playlist) {
+		if (plID != yt_playlistID) return Promise.resolve(); // Changed while loading
+		yt_playlist = playlist;
+		ui_addToPlaylist(0);
+		ui_setPlaylistFinished();
+		console.log("YT Playlist:", yt_playlist);
+	})
+	.catch(function() {
+		if (plID != yt_playlistID) return Promise.resolve(); // Changed while loading
+		ui_setPlaylistSaved(false);
+		return yt_loadPlaylistData(yt_playlistID, false)
+		.then(function(playlist) {
+			if (plID != yt_playlistID) return Promise.resolve(); // Changed while loading
+			ui_setPlaylistFinished ();
+			console.log("YT Playlist:", yt_playlist);
+		});
+	});
 }
+function ct_savePlaylist () {
+	if (!yt_playlist) return;
+	db_updatePlaylist(yt_playlist)
+	.then(function() {
+		ui_setupHome();
+		ui_setPlaylistSaved(true);
+		db_requestPersistence();
+	});
+}
+function ct_removePlaylist () {
+	if (!yt_playlist) return;
+	db_removePlaylist(yt_playlist.listID).then(function () {
+		ui_setPlaylistSaved (false);
+		ui_setupHome();
+	});
+}
+
 function ct_updatePlaylist () {
 	if (yt_playlistID) {
+		var plID = yt_playlistID;
 		yt_playlist = undefined;
 		ui_resetPlaylist();
 		ui_setupPlaylist();
-		yt_loadPlaylistData();
-		yt_playlistLoaded = function () {
-			db_updatePlaylist();
-		};
+		yt_loadPlaylistData(plID, false)
+		.then(function(playlist) {
+			if (plID == yt_playlistID) ui_setPlaylistFinished();
+			db_updatePlaylist(playlist)
+			.then(ui_setupHome);
+		});
 	}
 }
 function ct_resetPlaylist () {
@@ -640,7 +669,7 @@ function ct_resetPlaylist () {
 	ct_pagePlaylist = false;
 	yt_playlistID = undefined;
 	yt_playlist = undefined;
-	ui_resetPlaylist()
+	ui_resetPlaylist();
 	ct_updatePageState();
 }
 function ct_getVideoPlIndex () { // Return -1 on fail so that pos+1 will be 0
@@ -765,10 +794,10 @@ function ct_loadMedia () {
 	var loadingID = yt_videoID;
 	// Load and display cached data
 	var cacheLoad = db_getVideo(yt_videoID).then(function (video) {
-		if (!yt_video || loadingID != yt_videoID) return;
+		if (!yt_video || loadingID != yt_videoID) return Promise.reject();
 		yt_video.cached = true;
 		yt_video.cache = video.cache;
-		if (yt_video.meta != undefined) return;
+		if (yt_video.meta != undefined) return Promise.resolve();
 		yt_video.meta = {
 			title: video.title,
 			uploader: {
@@ -783,12 +812,15 @@ function ct_loadMedia () {
 			dislikes: video.dislikes,
 		};
 		ui_setVideoMetadata();
+		return Promise.resolve();
 	}).catch(function() {});
 	// Load, parse and display online video data
 	yt_loadVideoData(yt_videoID, false)
 	// Initiate further control
 	.then(function() {
 		ct_online = true;
+		if (yt_video.unavailable)
+			throw new ParseError(16, "Video is unavailable!", false);
 		if (yt_video.blocked)
 			throw new MDError(11, "Video is blocked in your country!", false);
 		if (yt_video.ageRestricted) 
@@ -814,24 +846,20 @@ function ct_loadMedia () {
 	.catch(function(error) {
 		if (!error) return; // Silent fail when request has gone stale (new page loaded before this finished)
 		if ((error.name == "TypeError" && error.message.includes("fetch")) || error instanceof NetworkError) {
-			var useCache = function () {
-				console.log("Offline - Cache Fallback!");
-				yt_video.streams = [];
-				ct_mediaLoaded();
-			};
-			var skipVideo = function () {
-				ct_online = false;
-				ct_mediaError(new MDError(14, "Offline", false));
-			};
-			if (yt_video.cached) {
-				if (yt_video.cache != undefined) useCache();
-				else skipVideo();
-			} else {
-				cacheLoad.then(function () {
-					if (yt_video.cache != undefined) useCache();
-					else skipVideo();
-				}).catch (skipVideo);
-			}
+			ct_online = false;
+			cacheLoad.then(function() {
+				if (yt_video.cache != undefined) {
+					console.log("Offline - Cache Fallback!");
+					yt_video.streams = [];
+					ct_mediaLoaded();
+					ct_updatePageState();
+					//ui_setVideoMetadata(); // Already done in cacheLoad
+					ui_setupMediaSession();
+				}
+				else return Promise.reject();
+			}).catch (function() {
+				ct_mediaError(new MDError(14, "Offline: " + error.message, false));
+			});
 		}
 		else {
 			ct_mediaError(error);
@@ -906,6 +934,7 @@ function ct_mediaError (error) {
 	md_paused = true;
 	md_flags.buffering = false;
 	md_flags.seeking = false;
+	md_errorText = error.message;
 	ui_updatePlayerState();
 
 	if (error instanceof MDError && !error.minor)
@@ -1117,93 +1146,180 @@ function db_getSavedPlaylist (plID) {
 	if (!db_playlists) console.error ("Playlist Index not loaded!");
 	return db_playlists.find(p => p.listID == plID);
 }
-function db_savePlaylist () {
-	if (yt_playlist) {
-		db_updatePlaylist();
-		ui_setPlaylistSaved (true);
-		db_requestPersistence();
-	}
-}
-function db_removePlaylist () {
-	if (!yt_playlist) return;
-	db_accessPlaylists().then(function () {
-		db_database.transaction("playlists", "readwrite").objectStore("playlists").delete(yt_playlist.listID).onsuccess = function () {
-			var index = db_playlists.findIndex(p => p.listID == yt_playlist.listID);
-			if (index != -1) db_playlists.splice(index, 1);
-			ui_setPlaylistSaved (false);
-			ui_setupHome();
-		};
-	});
-}
-function db_updatePlaylist () {
-	if (!yt_playlist) return;
-	db_accessPlaylists().then(function () {
-		// Request to update playlist
-		var playlistTransaction = db_database.transaction("playlists", "readwrite");
-		var playlistStore = playlistTransaction.objectStore("playlists");
-		var playlist = { // Discard full video information, only reference to video store
-			listID: yt_playlist.listID, 
-			title: yt_playlist.title, 
-			author: yt_playlist.author, 
-			views: yt_playlist.views, 
-			description: yt_playlist.description,
-			thumbID: yt_playlist.thumbID,  
-			count: yt_playlist.count, 
-			videos: yt_playlist.videos.map(function (v) { return v.videoID; }),
-		};
-		playlistStore.put(playlist);
-		// Request to add all videos (will overwrite existing ones with updated data)
-		var videoTransaction = db_database.transaction("videos", "readwrite");
-		var videoStore = videoTransaction.objectStore("videos");
-		yt_playlist.videos.forEach (function (video) {
-			videoStore.put(video);
+function db_removePlaylist (listID) {
+	if (!listID) return Promise.reject();
+	return db_accessPlaylists().then(function () {
+		return new Promise(function(resolve, reject) {
+			db_database.transaction("playlists", "readwrite")
+			.objectStore("playlists")
+			.delete(listID).onsuccess = function () {
+				var index = db_playlists.findIndex(p => p.listID == listID);
+				if (index != -1) db_playlists.splice(index, 1);
+				resolve();
+			};
 		});
-		// Transactions close automatically
-		var plSuccess, vdSuccess;
-		var success = function () { 
-			var index = db_playlists.findIndex(p => p.listID == playlist.listID);
-			if (index == -1) db_playlists.push(playlist);
-			else db_playlists[index] = playlist;
-			ui_setupHome();
-		};
-		playlistTransaction.oncomplete = function () {
-			plSuccess = true;
-			if (plSuccess && vdSuccess) success();
-		};
-		videoTransaction.oncomplete = function () {
-			vdSuccess = true;
-			if (plSuccess && vdSuccess) success();
-		};
-	}).catch(function (error) {
-		console.error(error);
 	});
 }
-function db_loadPlaylist (callback) {
-	var plID = yt_playlistID;
-	db_access().then (function () {
-		var playlistStore = db_database.transaction("playlists", "readonly").objectStore("playlists");
-		playlistStore.get(plID).onsuccess = function (pe) {
-			var playlist = pe.target.result;
-			var videoIDs = playlist.videos.map(function (id, i) { return { i: i, id: id } });
-			
-			var videoTransaction = db_database.transaction("videos", "readonly");
+function db_updatePlaylist (playlist) {
+	if (!playlist) return;
+	// Cache all playlist thumbnails using cors server
+	db_cacheMissingThumbnails(playlist.videos.map(plVid => plVid.thumbnailURL));
+	// Update playlist	
+	return db_accessPlaylists().then(function () {
+		var playlistWrite = new Promise (function(resolve, reject) {
+			// Request to update playlist
+			var playlistTransaction = db_database.transaction("playlists", "readwrite");
+			var playlistStore = playlistTransaction.objectStore("playlists");
+			var playlistObj = { // Discard full video information, only reference to video store
+				listID: playlist.listID, 
+				title: playlist.title, 
+				author: playlist.author, 
+				views: playlist.views, 
+				description: playlist.description,
+				thumbID: playlist.thumbID,  
+				count: playlist.count, 
+				videos: playlist.videos.map(function (v) { return v.videoID; }),
+			};
+			playlistStore.put(playlistObj).onsuccess = resolve;
+			// Also write into playlists in memory
+			var index = db_playlists.findIndex(p => p.listID == playlistObj.listID);
+			if (index == -1) db_playlists.push(playlistObj);
+			else db_playlists[index] = playlistObj;
+		});
+		var videoStore = new Promise (function(resolve, reject) {
+			// Request to add all videos (will overwrite existing ones with updated data)
+			var videoTransaction = db_database.transaction("videos", "readwrite");
 			var videoStore = videoTransaction.objectStore("videos");
-			
-			playlist.videos = [];
-			videoIDs.forEach (function (v) {
-				videoStore.get(v.id).onsuccess = function (e) {
-					playlist.videos[v.i] = e.target.result;
-				};
+			playlist.videos.forEach (function (video) {
+				videoStore.put(video);
 			});
-			videoTransaction.oncomplete = function () {
-				if (yt_playlistID == plID) {
-					yt_playlist = playlist;
-					if (callback) callback();
-				}
-				else console.error("Switched playlist while loading from database!");
-			};	
-		};
+			videoTransaction.oncomplete = resolve;
+		});
+		return Promise.all([playlistWrite, videoStore]);
+	});
+}
+function db_loadPlaylist(listID) {
+	return db_access().then (function () {
+		return new Promise (function (resolve, reject) {
+			var playlistStore = db_database.transaction("playlists", "readonly").objectStore("playlists");
+			var listReq = playlistStore.get(listID);
+			listReq.onsuccess = function (pe) {
+				var playlist = pe.target.result;
+				if (!playlist) return reject();
+				var videoIDs = playlist.videos.map(function (id, i) { return { i: i, id: id } });
+
+				var videoTransaction = db_database.transaction("videos", "readonly");
+				var videoStore = videoTransaction.objectStore("videos");
+
+				playlist.videos = [];
+				videoIDs.forEach (function (v) {
+					videoStore.get(v.id).onsuccess = function (e) {
+						playlist.videos[v.i] = e.target.result;
+					};
+				});
+				videoTransaction.oncomplete = function () {
+					resolve(playlist);
+				};
+			};
+			listReq.onerror = reject;
+		});
 	});	
+}
+function db_fixCache() {
+	return window.caches.open("flagplayer-thumbs")
+	.then(function(cache){
+		return cache.keys()
+		.then(function(keys) {
+			return Promise.all(
+				keys.map(function(key) {
+					return cache.delete(key);
+				})
+			)
+		})
+		.then(ui_setupCache);
+	}).then(function(){
+		return db_getStoredVideos()
+		.then(function(storedVideos) {
+			var thumbnails = storedVideos.map(vid => vid.thumbnailURL);
+			return db_cacheThumbnails(thumbnails);
+		})
+		.then(ui_setupCache);
+	});
+}
+function db_cacheMissingThumbnails(thumbs) {
+	var missingThumbs = [];
+	return window.caches.open("flagplayer-thumbs")
+	.then(function(cache) {
+		return Promise.all(
+			thumbs.map(function(thumb) {
+				return cache.match(thumb)
+				.then(function(result) {
+					if (!result) missingThumbs.push(thumb);
+				})
+			})
+		);
+	})
+	.then(function() {
+		return db_cacheThumbnails(missingThumbs);
+	});
+
+}
+function db_cacheThumbnails(thumbs) {
+	if (thumbs.length == 0) return Promise.resolve();
+	// This downloads all passed thumbnail URLs and caches them apropriately
+	// This is done in batches of 100, as no more than 6 fetches will run at once anyway
+	// and browser will reject fetch requests when theres a ton of them
+	// and this function is expected to handle 1000s of thumbnails at once, soo...
+	var notID = "cacheThumb-" + thumbs.length;
+	var cacheThumbAbort = false;
+	var cacheThumbProgress = 0;
+	var cacheThumbFail = 0;
+	var cacheThumbTotal = thumbs.length;
+	var cacheThumbSize = 0;
+	var cacheThumbController = new AbortController(); 
+	var cacheThumbBatches = Math.ceil(cacheThumbTotal / 100);
+	ui_setNotification(notID, "Caching thumbnails: 0 / " + cacheThumbTotal + " (" + ui_shortenBytes(cacheThumbSize) + ")")
+		.notOnClose = function() { cacheThumbAbort = true; cacheThumbController.abort(); };
+	var fresh = true;
+
+	var cacheBatch = function(cache, batchIndex) { // Enclosing function only used for capturing the index i
+		if (cacheThumbAbort) return Promise.reject();
+		if (batchIndex >= cacheThumbBatches) return Promise.resolve();
+		return Promise.allSettled( // wait for 100 thumbnails requests to settle
+			thumbs.slice(batchIndex*100, (batchIndex+1)*100)
+			.map(function(thumb) {
+				return fetch(ct_pref.corsAPIHost + thumb, { signal: cacheThumbController.signal })
+				.then(function(response) {
+					if (!response.ok) {
+						cacheThumbFail++;
+						return Promise.reject();
+					}
+					var thumbSize = parseInt(response.headers.get("content-length"));
+					cacheThumbSize += thumbSize;
+					return cache.put(thumb, response)
+					.then(function() {
+						cacheThumbProgress++;
+						if (cacheThumbAbort) return;
+						ui_setNotification(notID, "Caching thumbnails: " + cacheThumbProgress + " / " + cacheThumbTotal + " (" + ui_shortenBytes(cacheThumbSize) + ")");
+					});
+				});
+			})
+		).then(function(results) { // Control outcome of this batch of 100
+			if (results.reduce((f, v) => f + (v.status == "rejected"? 1 : 0), 0) > 10)
+				return Promise.reject(); // More than 10 failed, probably encountered some network error
+			return cacheBatch(cache, batchIndex+1);
+		});
+	};
+
+	return window.caches.open("flagplayer-thumbs")
+	.then(function(cache) {
+		return cacheBatch(cache, 0); // This will recursively cache the thumbnails in batches of 100
+	})
+	.finally(function() {
+		if (cacheThumbAbort) return;
+		ui_setNotification(notID, "Cached thumbnails: " + cacheThumbProgress + " (" + ui_shortenBytes(cacheThumbSize) + ")" 
+			+ (cacheThumbFail > 0? (" - " + cacheThumbFail + " failed") : ""), 3000);
+	});
 }
 function db_currentVideoAsCache() {
 	if (yt_video == undefined)
@@ -1227,6 +1343,22 @@ function db_currentVideoAsCache() {
 		tags: "", // Got none of that
 		categoryID: yt_video.meta.category,
 	};
+}
+function db_getStoredVideos () {
+	return db_access().then(function() {
+		return new Promise (function (resolve, reject) {
+			var videoStore = db_database.transaction("videos", "readonly").objectStore("videos");
+			var storedVideos = [];
+			videoStore.openCursor().onsuccess = function (e) {
+				if (e.target.result) {
+					storedVideos.push(e.target.result.value);
+					e.target.result.continue();
+				} else {
+					resolve(storedVideos);
+				}
+			};
+		});
+	});
 }
 function db_storeVideo(video) {
 	return db_access().then(function () {
@@ -1258,8 +1390,8 @@ function db_getVideo(videoID) {
 /* ------------------------------------------------- */
 
 function db_getCachedVideos () {
-	return new Promise (function (resolve, reject) {
-		return db_access().then(function() {
+	return db_access().then(function() {
+		return new Promise(function(resolve, reject) {
 			var videoStore = db_database.transaction("videos", "readonly").objectStore("videos");
 			var cachedVideos = [];
 			videoStore.openCursor().onsuccess = function (e) {
@@ -1386,23 +1518,30 @@ function yt_browse (subPath) {
 		.then (function (html) {
 			var page = {};
 			page.html = html;
+			page.isDesktop = true;
 
 			try { 
 				var match = page.html.match (/window\["ytInitialData"\]\s*=\s*({.*?});/);
-				if (!match) match = page.html.match (/<div\s+id="initial-data">\s*<!--\s*({.*?})\s*-->\s*<\/div>/);
+				if (!match) {
+					match = page.html.match (/<div\s+id="initial-data">\s*<!--\s*({.*?})\s*-->\s*<\/div>/);
+					if (match) page.isDesktop = false;
+				}
 				page.initialData = JSON.parse(match[1]); 
 			} catch (e) { console.error("Failed to get initial data!", e); }
 
 			try { page.configParams = JSON.parse(page.html.match (/ytcfg\.set\s*\(({.*?})\);/)[1]); 
 			} catch (e) { console.error("Failed to get config params!", e); }
 
-			// Whether YouTube thinks this is mobile - independant from ct_isDesktop, which is this apps opinion
-			page.isDesktop = !page.initialData || Object.keys(page.initialData.contents).some(function (s) { return s.startsWith("twoColumn"); });
-
 			// Check if cors host is used
 			if (ct_isAdvancedCorsHost == undefined)
 				ct_isAdvancedCorsHost = response.headers.has("x-set-cookies");
 
+			// Check if page (or video) is unavailable
+			page.unavailable = !page.initialData || !page.initialData.contents;
+
+			// Whether YouTube thinks this is mobile - independant from ct_isDesktop, which is this apps opinion
+			//page.isDesktop = Object.keys(page.initialData.contents).some(function (s) { return s.startsWith("twoColumn"); });
+			
 			// Extract youtube secrets
 			page.secrets = {};
 			
@@ -1664,31 +1803,30 @@ function yt_loadListData(addElements, initialLoad, finished, supressLoader) {
 /* ---- Playlist ------ */
 /* -------------------- */
 
-function yt_loadPlaylistData() {
-	// Validate Playlist ID
-	if (yt_playlist && yt_playlist.listID && yt_playlist.listID == yt_playlistID) return;
-	yt_playlist = undefined;
-	if (!yt_playlistID) return;
-	yt_playlist = { listID: yt_playlistID, videos: [] };
-	// Load playlist data
-	var initialLoad = function () {
-		yt_playlist.title = yt_playlist.lastPage.title; 
-		yt_playlist.author = yt_playlist.lastPage.author; 
-		yt_playlist.views = yt_playlist.lastPage.views; 
-		yt_playlist.description = yt_parseText(yt_playlist.lastPage.description);
-		yt_playlist.thumbID = (yt_playlist.videos[0] || {}).videoID;
-	};
-	var addElements = function (container, videos, prevVidCount) {
-		ui_addToPlaylist(prevVidCount);
-	};
-	var finished = function (container, videos) {
-		console.log("YT Playlist:", yt_playlist);
-		ui_setPlaylistFinished ();
-		yt_playlist.count = yt_playlist.videos.length;
-		if (yt_playlistLoaded) yt_playlistLoaded();
-	};
-	ct_registerPagedContent("PL", ht_playlistVideos, yt_loadListData(addElements, initialLoad, finished, true), true, yt_playlist);
-	ct_checkPagedContent();
+function yt_loadPlaylistData(listID, background) {
+	if (!listID || !listID.match(/^([A-Z]{2}[a-zA-Z0-9_-]{20,})$/)) return Promise.reject(new TypeError("Playlist ID " + listID + " invalid!"));
+	var playlist = { listID: listID, videos: [] };
+	if (!background) yt_playlist = playlist;
+	return new Promise(function(resolve, reject) {
+		// Load playlist data
+		var initialLoad = function () {
+			playlist.title = playlist.lastPage.title; 
+			playlist.author = playlist.lastPage.author; 
+			playlist.views = playlist.lastPage.views; 
+			playlist.description = yt_parseText(playlist.lastPage.description);
+			playlist.thumbID = (playlist.videos[0] || {}).videoID;
+		};
+		var addElements = function (container, videos, prevVidCount) {
+			if (!background && yt_playlistID == listID)
+				ui_addToPlaylist(prevVidCount);
+		};
+		var finished = function (container, videos) {
+			playlist.count = playlist.videos.length;
+			resolve(playlist);
+		};
+		ct_registerPagedContent("PL" + listID, ht_playlistVideos, yt_loadListData(addElements, initialLoad, finished, true), true, playlist);
+		ct_checkPagedContent();
+	});
 }
 
 /* -------------------- */
@@ -1964,7 +2102,9 @@ function yt_loadVideoData(id, background) {
 		if (!background && (ct_page != Page.Media || video != yt_video))
 			return Promise.reject(); // Request has gone stale
 		if (!background) yt_page = page;
+		video.unavailable = page.unavailable;
 		try { // Parse player config
+			if (video.unavailable) throw new Error();
 			var match = page.html.match (/;\s*ytplayer\.config\s*=\s*({.*?});/);
 			if (!match) match = page.html.match (/ytInitialPlayerConfig\s*=\s*({.*?});/); // Mobile
 			page.config = JSON.parse(match[1]);
@@ -1972,8 +2112,8 @@ function yt_loadVideoData(id, background) {
 		} catch (e) {
 			if (!page.html.includes('id="player-api"'))
 				return Promise.reject(new ParseError("Failed to parse JSON and no player-api found!"), 21, page.html);
-			// Video blocked
-			video.blocked = true;
+			// Video blocked or unavailable
+			video.blocked = !video.unavailable;
 			// Attempt to get metadata through separate request
 			return fetch(ct_pref.corsAPIHost + HOST_YT + "/get_video_info?ps=default&video_id=" + id)
 			.then (function(data) {
@@ -1995,12 +2135,16 @@ function yt_loadVideoData(id, background) {
 		// Check age restriction
 		video.ageRestricted = page.html.indexOf("og:restrictions:age") != -1;
 		// Check playability (blocked, age restricted, etc.)
-		video.status = page.config.args.player_response.playabilityStatus.status;
+		var status = page.config.args.player_response.playabilityStatus;
+		video.status = status.status == "OK"? "OK" : (status.status + ": " + status.reason);
 
 		// Extract metadata
-		video.meta = yt_extractVideoMetadata(page);
+		if (video.unavailable)
+			video.meta = {};
+		else
+			video.meta = yt_extractVideoMetadata(page);
 
-		if (!video.blocked) {
+		if (!video.blocked && !video.unavailable) {
 			// Extract related videos
 			video.related = yt_extractRelatedVideoData(page.initialData);
 			// Extract comments
@@ -2662,6 +2806,8 @@ function ui_updatePlayerState () {
 	I("playButton").setAttribute("state", md_paused? "off" : "on");
 	setDisplay("bufferingIndicator", md_state == State.Loading || (md_state == State.Started && md_flags.buffering)? "block" : "none");
 	setDisplay("errorIndicator", md_state == State.Error? "block" : "none");
+	I("errorMessage").children[0].innerText = md_errorText;
+	setDisplay("errorMessage", md_state == State.Error? "block" : "none");
 	setDisplay("endedIndicator", md_state == State.Ended? "block" : "none");
 	setDisplay("nextLoadIndicator", "none");
 	setDisplay("startPlayIndicator", md_state == State.PreStart? "block" : "none");
@@ -2850,7 +2996,26 @@ function ui_resetHome () {
 function ui_setupCache () {
 	if (ct_page != Page.Cache) return;
 	I("cacheAmount").innerText = db_cachedVideos.length;
-	I("cacheUsage").innerText = ui_shortenBytes(db_getCacheSize());
+	var cacheSize = db_getCacheSize();
+	I("cacheUsage").innerText = ui_shortenBytes(cacheSize);
+	if ("storage" in navigator) {
+		navigator.storage.estimate().then(function(estimate) {
+			setDisplay("cacheQuotaBar", "");
+			if ((estimate.usage - cacheSize) > 100000000)
+			{ // Likely cached in previous version of FlagPlayer with wrong cache methid
+				// 100MB is nearly impossible to hit normally (around 25000 video thumbnails)
+				// but very easy to hit if cached wrong (15 video thumbnails, 7MB estimated space per video)
+				setDisplay("cacheFixText", "");
+				setDisplay("cacheFixButton", "");
+			}
+			I("cacheQuota").innerText = ui_shortenBytes(estimate.usage) + " / " + ui_shortenBytes(estimate.quota);
+		})
+		.catch(function() { 
+			setDisplay("cacheQuotaBar", "none");
+		});
+	} else {
+		setDisplay("cacheQuotaBar", "none");
+	}
 	var cachedVideoList = I("cacheVideoList");
 	cachedVideoList.innerHTML = "";
 	db_cachedVideos.forEach(function (v) {
@@ -2967,7 +3132,7 @@ function ui_setVideoMetadata() {
 	if (yt_video.loaded && ct_pref.loadComments)
 	{
 		sec_comments.style.display = "block";
-		if (!ct_isDesktop) // can't sort comments on mobile
+		if (!yt_page.isDesktop) // can't sort comments on mobile
 			I("commentContextActions").style.display = "none"; 
 	}
 	
@@ -3204,10 +3369,7 @@ function ui_setupPlaylist () {
 	sec_playlist.style.display = "block";
 	setDisplay("plLoadingIndicator", "initial");
 	ui_addLoadingIndicator(ht_playlistVideos, true);
-	ui_setPlaylistSaved(false);
-	db_accessPlaylists().then(function () {
-		ui_setPlaylistSaved(db_hasPlaylistSaved(yt_playlistID));
-	});
+	ui_setPlaylistSaved(true);
 }
 function ui_setPlaylistSaved (saved) {
 	setDisplay("plSave", saved? "none" : "initial");
@@ -3694,8 +3856,8 @@ function ui_setupEventHandlers () {
 	I("fullscreenButton").onclick = onToggleFullscreen;
 	I("volumeSlider").onchange = onControlVolumeChange;
 	// Playlist
-	I("plRemove").onclick = db_removePlaylist;
-	I("plSave").onclick = db_savePlaylist;
+	I("plRemove").onclick = ct_removePlaylist;
+	I("plSave").onclick = ct_savePlaylist;
 	I("plUpdate").onclick = ct_updatePlaylist;
 	I("plClose").onclick = ct_resetPlaylist;
 	// Options Panel
@@ -3716,6 +3878,8 @@ function ui_setupEventHandlers () {
 	I("st_cache_quality").onchange = function () { onSettingsChange("CC"); };
 	I("st_cache_force").onchange = function () { onSettingsChange("CC"); };
 	I("st_small_player").onchange = function () { onSettingsChange("SP"); };
+	// Cache
+	I("cacheFixButton").onclick = function () { db_fixCache() };
 	// Context
 	I("videoContextActions").onchange = onSelectContextAction;
 	I("commentContextActions").onchange = onSelectContextAction;
@@ -4500,7 +4664,7 @@ function md_assureSync () {
 //region
 
 class ParseError extends Error {
-	constructor (message, code, object) {
+	constructor (code, message, object) {
 		super (message);
 		this.name = "ParseError";
 		this.code = code;

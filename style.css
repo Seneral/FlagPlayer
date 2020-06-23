@@ -351,6 +351,7 @@ a, a:visited, a:hover, a:active {
 	height: 0;
 }
 .indicator {
+	display: block;
 	position: absolute;
 	height: 6em;
 	width: 6em;
@@ -387,6 +388,20 @@ a, a:visited, a:hover, a:active {
 #nextLoadIndicator > use {
 	animation: loader_fill 8s linear;
 }
+.errorSubscript {
+	position: absolute;
+	height: 1em;
+	width: 100vw;
+	left: -50vw;
+	top: 4.5em;
+	text-align: center;
+}
+.errorSubscript > span {
+	border-radius: 5%;
+	background: rgba(0,0,0,0.5);
+	padding: 0.2em 0.5em;
+}
+
 
 
 /* --------------------------- */

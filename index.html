@@ -67,6 +67,7 @@ See https://github.com/Seneral/FlagPlayer for details
 					<svg class="indicator big" 			id="nextLoadIndicator" 	viewBox="0 0 48 48"><use href="#svg_loadCircle"/></svg>
 					<svg class="indicator temp" 		id="playIndicator" 		viewBox="0 0 48 48"><use href="#svg_play"/></svg>
 					<svg class="indicator temp" 		id="pauseIndicator" 	viewBox="0 0 48 48"><use href="#svg_pause"/></svg>
+					<span class="errorSubscript" id="errorMessage"><span>An Error occured!</span></span>
 				</div>
 				<div class="controlOverlay"></div>
 
@@ -233,7 +234,7 @@ See https://github.com/Seneral/FlagPlayer for details
 							You can search for videos, enter and save your YouTube playlists to access them offline at any point, and cache individual audio streams for offline playback.</br>
 							</br>
 							<span class="freeHeader">Web App?</span></br>
-							Once accessed FlagPlayer resides in your browser cache (less than 100KB) and does not require an active internet connection to work, except of course to fetch the videos from YouTubes servers. That means you can listen to cached audio even when completely offline. Additionally you can add FlagPlayer to your home screen and it will act like any other normal app. If you find that your playlists and cached audio streams dissappear from time to time, then the browser purged them. Adding FlagPlayer to the home screen might fix this as it indicates your intent to interact with the data you saved, making the browser less likely to delete it when you're running low on memory. </br>
+							Once accessed FlagPlayer resides in your browser cache (less than 100KB) and does not require an active internet connection to work, except of course to fetch the videos from YouTubes servers. That means you can listen to cached audio even when completely offline. Additionally you can add FlagPlayer to your home screen and it will act like any other normal app. </br>
 							</br>
 							<span class="freeHeader">Audio Caching</span></br>
 							You can find the option to cache an audio stream in the context menu of the video title bar. After caching, just go to your saved playlist and FlagPlayer will detect when you are offline and automatically only play back your cached audio in that playlist, until you are online again. Even if you are online, if you left "Cache First" in the settings enabled, it will use the cached audio without redownloading the stream. To view all cached streams and the storage usage, go to the settings and click on "Audio Cache". </br>
@@ -254,6 +255,22 @@ See https://github.com/Seneral/FlagPlayer for details
 						Your playlists and audio cache may be cleared by the browser when space is running low. </br>
 						Try bookmarking FlagPlayer or adding it to the home screen if data keeps dissappearing. </br>
 						</br>
+					</div>
+					<div class="freeText" id="cacheFixText" style="display: none;">
+						You seem to have cached playlists on an older version of FlagPlayer. </br>
+						Due to <a href="https://github.com/Seneral/FlagPlayer/issues/2">an issue</a> the browser estimations of the storage usage are wrong, and the browser is likely to delete your cached data. </br>
+						To fix this FlagPlayer needs to reload all thumbnails of your saved playlists. Hit Fix browser estimation below to continue. However, this could take a long time if you have more than a few hundred videos. </br>
+						You can abort this process, but if you do, some video thumbnails won't be cached for offline use. If you find yourself in this situation, simply update the affected playlist and FlagPlayer will download the missing thumbnails. </br>
+						</br>
+					</div>
+					<div class="actionBar headerBar" id="cacheQuotaBar">
+						<button class="barAction fixed" id="cacheFixButton" style="display: none;">
+							<svg viewBox="6 6 36 36"><use href="#svg_list_update"/></svg>
+							<span>Fix browser estimation</span>
+						</button>
+						<div class="flexSpace"></div>
+						<span class="barLabel">Total Storage Quota:</span>
+						<span class="barText" id="cacheQuota">0B / 0B</span>
 					</div>
 					<div class="actionBar headerBar">
 						<span class="barLabel">Cached Audio Streams:</span>
