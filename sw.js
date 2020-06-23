@@ -1,4 +1,4 @@
-var VERSION = 7;
+var VERSION = 8;
 var APP_CACHE = "flagplayer-cache-1";
 var IMG_CACHE = "flagplayer-thumbs";
 var MEDIA_CACHE = "flagplayer-media";
@@ -88,9 +88,7 @@ self.addEventListener('fetch', function(event) {
 			}).then(function(cacheResponse) {
 				if (cacheResponse)
 					return cacheResponse;
-				return fetch(event.request).then(function(fetchResponse) {
-					return fetchResponse;
-				});
+				return fetch(event.request);
 			}).then(function(response) {
 				return response.arrayBuffer()
 				.then(function(byteData) {
@@ -121,16 +119,7 @@ self.addEventListener('fetch', function(event) {
 					// Cache if desired
 					if (url.startsWith(BASE + "/favicon")) {
 						var cacheResponse = response.clone();
-						caches.open(APP_CACHE).then((cache) => cache.put(event.request, cacheResponse));
-					}
-					else {
-						var thumb = url.match(/https:\/\/i.ytimg.com\/vi\/([a-zA-Z0-9_-]{11})\/default\.jpg/);
-						if (thumb) {
-							var cacheResponse = response.clone();
-							db_hasVideo(thumb[1]).then(function() { // Video stored, cache thumbnail
-								caches.open(IMG_CACHE).then((cache) => cache.put(event.request, cacheResponse));
-							}).catch(function() {});
-						}
+						event.waitUntil(caches.open(APP_CACHE).then(cache => cache.put(event.request, cacheResponse)));
 					}
 					return response;
 				}).catch(function(error) {});
