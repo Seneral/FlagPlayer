@@ -1,13 +1,12 @@
 # FlagPlayer
 A simple YouTube Web-App focussed on music playback
 
-- Standard player features (select streams freely, e.g. audio only)
-- Save playlists and cache audio for offline playback
+- Standard player features (e.g. audio only, background playback on mobile)
+- Save playlists and cache audio for offline playback on the go
 - Free, easy to modify and all important stuff happens client-side
 - No official YouTube API used (so legally safe), no third party code used
 - Only 30kb (download) / 110kb (memory) - much smaller than YouTube and even Invidious
-- No arbitrary restrictions (e.g. background playback on mobile)
-- Standard Watch, Search and channel pages with few restrictions
+- Standard Watch, Search and channel pages with a few restrictions
 - Convenient settings, dark and light mode, etc.
 
 ## Missing standard features
