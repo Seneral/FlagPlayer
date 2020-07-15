@@ -383,6 +383,9 @@ function ct_resetContent () {
 	ct_mediaUnload();
 	ui_resetHome();
 	ui_resetCache();
+	// If on mobile, collapse playlist
+	if (!ct_isDesktop) sec_playlist.setAttribute("collapsed", "");
+
 }
 function ct_loadContent () {
 	// Primary Content
@@ -2729,6 +2732,8 @@ function ui_updatePageLayout (forceRebuild = false) {
 		ht_side.appendChild(sec_related);
 		document.body.classList.add("desktop");
 		document.body.classList.remove("mobile");
+		// Uncollapse playlist on desktop by default
+		sec_playlist.removeAttribute("collapsed");
 	}
 	if (!ct_isDesktop && (setDesktop || forceRebuild)) {
 		ht_container.insertBefore(sec_player, ht_container.firstChild);
@@ -2742,8 +2747,6 @@ function ui_updatePageLayout (forceRebuild = false) {
 		ht_mobile.appendChild(sec_channel);
 		document.body.classList.add("mobile");
 		document.body.classList.remove("desktop");
-		// Collapse playlist on mobile by default
-		I("playlist").setAttribute("collapsed", "");
 	}
 }
 
@@ -3364,6 +3367,7 @@ function ui_resetChannelUploads () {
 
 function ui_setupPlaylist () {
 	ui_plScrollPos = 0;
+	ui_plScrollDirty = true;
 	I("plTitle").innerText = "";
 	I("plDetail").innerText = "";
 	sec_playlist.style.display = "block";
@@ -3394,6 +3398,7 @@ function ui_addToPlaylist (startIndex) {
 	if (focusIndex != undefined) ui_setPlaylistPosition (focusIndex);
 	ht_playlistVideos.onscroll = function () {
 		ui_plScrollPos = ht_playlistVideos.scrollTop;
+		ui_plScrollDirty = false;
 		ui_checkPlaylist();
 	};
 	sec_playlist.onCollapse = function (collapsed) { // Triggered by collapser
@@ -3410,8 +3415,10 @@ function ui_resetPlaylist () {
 	ht_playlistVideos.innerHTML = "";
 	ht_playlistVideos.removeAttribute("top-loaded");
 	ht_playlistVideos.removeAttribute("bottom-loaded");
+	if (!ct_isDesktop) sec_playlist.setAttribute("collapsed", "");
 	sec_playlist.style.display = "none";
 	ui_plScrollPos = 0;
+	ui_plScrollDirty = true;
 }
 function ui_setPlaylistPosition(index) {
 	ui_plScrollPos = Math.max(0, 60 * index - 40);
@@ -3530,7 +3537,7 @@ function ui_setupCollapsableText (element, max, offsetHeight) {
 		if (offsetHeight / parseInt(style.lineHeight) > max*1.05) {
 			collapsable.setAttribute("collapsed", "");
 			collapser.innerText = collapser.getAttribute("more-text");
-			collapser.style.display = "block";
+			collapser.style.display = "";
 		} else {
 			collapser.style.display = "none";
 		}
@@ -4762,19 +4769,18 @@ function ht_getVideoPlaceholder (id, prim, sec) {
 	if (!ht_placeholder) {
 		ht_placeholder = document.createElement("DIV");
 		ht_placeholder.className = "liElement";
-		ht_placeholder.innerHTML = 
-			'<div class="liDetail selectable">' + 
-				'<span class="twoline liPrimary"></span>' +
-				'<span class="oneline liSecondary"></span>' +
-			'</div>';
+		ht_placeholder.innerHTML = '<div><span></span><span></span></div>';
 	}
 	var placeholder = ht_placeholder.cloneNode(true);
-	placeholder.setAttribute("videoID", id);
-	placeholder.firstElementChild.children[0].innerText = prim;
-	placeholder.firstElementChild.children[1].innerText = sec;
+	placeholder.children[0].children[0].innerText = prim;
+	placeholder.children[0].children[1].innerText = sec;
 	return placeholder;
 }
 function ht_fillVideoPlaceholder (element, index, id, length) {
+	element.setAttribute("videoID", id);
+	element.children[0].className = "liDetail selectable";
+	element.children[0].children[0].className = "twoline liPrimary";
+	element.children[0].children[1].className = "oneline liSecondary";
 	element.insertAdjacentHTML ("afterBegin",
 		'<a class="overlayLink" navigation="v=' + id + '" href="' + ct_getNavLink("v=" + id) + '"></a>' + 
 		'<div class="liIndex">' + index + '</div>' + 
@@ -4790,6 +4796,10 @@ function ht_clearVideoPlaceholder (element) {
 		element.removeChild(element.firstElementChild);
 		element.removeChild(element.firstElementChild);
 	}
+	element.removeAttribute("videoID");
+	element.children[0].removeAttribute("class");
+	element.children[0].children[0].removeAttribute("class");
+	element.children[0].children[1].removeAttribute("class");
 	return element;
 }
 function ht_appendVideoElement (container, index, id, length, prim, sec, tert, contextData) {
