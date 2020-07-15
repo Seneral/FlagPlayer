@@ -174,8 +174,28 @@ a, a:visited, a:hover, a:active {
 	max-height: 100%;
 	margin-bottom: 1em;
 }
-.mobile .playlistContainer {
+.mobile .section.playlist .playlistContainer {
 	max-height: 100%;
+}
+/* Modify playlist behaviour on mobile to occupy fullscreen */
+/* Not critical if :not not supported, no mobile-first here */
+.mobile .section.playlist.collapsable:not([collapsed]) {
+	display: flex !important;
+	flex-direction: column;
+	z-index: 10;
+	position: fixed;
+	top: 49px; /* header height 3.5em * 14px */
+	bottom: 0;
+	left: 0;
+	right: 0;
+	height: auto;
+	margin: unset;
+}
+.mobile .section.playlist.collapsable:not([collapsed]) .playlistContainer {
+	height: 100%;
+}
+.mobile .section.playlist.collapsable:not([collapsed]) .playlistHead {
+	flex-shrink: 0;
 }
 .mobile .section.video {}
 .mobile .section.related {}
