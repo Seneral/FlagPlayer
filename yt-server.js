@@ -14,7 +14,7 @@ cors_proxy.createServer({
     removeHeaders: [
         'connection',
         'host',
-        'origin',
+        //'origin',
         // Strip Heroku-specific headers
         'x-heroku-queue-wait-time',
         'x-heroku-queue-depth',
