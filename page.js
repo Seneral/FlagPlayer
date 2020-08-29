@@ -483,18 +483,15 @@ function ct_updatePageState () { // Update page with new information
 function ct_getNavLink(navID) {
 	var i = navID.indexOf("=");
 	if (i != -1) {
-		var params = [];
-		if (yt_playlistID) params.push({ n: "list", v: yt_playlistID });
-		params.push({ n: navID.substring(0, i), v: navID.substring(i+1, navID.length) });
-		var symbol = "?";
-		var link = BASE_URL;
-		for (var i = 0; i < params.length; i++) {
-			link += symbol + params[i].n + "=" + params[i].v;
-			symbol = "&";
-		}
+		var link = BASE_URL + "?";
+		// Prepend current playlist ID
+		if (navID.substring(0, i) != "list" && yt_playlistID)
+			link += "list=" + yt_playlistID + "&";
+		// Add parameter
+		link += navID.substring(0, i) + "=" + navID.substring(i+1, navID.length);
 		return link;
 	}
-	else return BASE_URL;
+	else return BASE_URL + (yt_playlistID? "?list=" + yt_playlistID : "");
 }
 function ct_beforeNav () {
 	ct_resetContent();
@@ -743,7 +740,7 @@ function ct_loadChannel() {
 	.catch(function(error) {
 		ui_removeLoadingIndicator(sec_channel);
 		if (!error) return; // Silent fail when request has gone stale (new page loaded before this finished)
-		if ((error.name == "TypeError" && error.message.includes("fetch")) || error instanceof NetworkError) {
+		if (error instanceof NetworkError) {
 			console.error("Network Error! Could not load Channel Page!");
 		}
 		else {
@@ -768,18 +765,22 @@ function ct_resetChannel () {
 function ct_nextVideo() {
 	var newVideo;
 	if (yt_playlist) {
-		var playlist = yt_playlist.videos;
-		if (!ct_online) // Only cached available
-			playlist = playlist.filter (v => v.cache != undefined);
-		var index = ct_getVideoPlIndex();
-		if (playlist.length > 1 && index >= 0) // No duplicate playback please
-			playlist = playlist.filter (v => v.videoID != yt_videoID);
+		var playlist = yt_playlist.videos.slice();
+		// Only show cached videos if offline
+		if (!ct_online) playlist = playlist.filter (v => v.cache != undefined);
+		// If none cached, still flip through uncache videos
+		if (playlist.length == 0) playlist = yt_playlist.videos;
+		// Filter out current video to prevent duplicate playback
+		var index = playlist.findIndex(v => v.videoID == yt_videoID);
+		if (playlist.length > 1 && index >= 0)
+			playlist.splice(index, 1);
+		// Choose random video
 		if (playlist.length == 0) index = -1;
 		else if (ct_pref.playlistRandom) index = Math.floor (Math.random() * playlist.length);
 		else index = index % playlist.length; // Already removed current
-		newVideo = index > 0? playlist[index] : undefined;
+		newVideo = index >= 0? playlist[index] : undefined;
 	}
-	else if (yt_video && yt_video.related && ct_online) {
+	else if (yt_video && yt_video.related) {
 		newVideo = yt_video.related.videos[0];
 	}
 	if (newVideo) ct_navVideo(newVideo.videoID);
@@ -823,15 +824,17 @@ function ct_loadMedia () {
 	.then(function() {
 		ct_online = true;
 		if (yt_video.unavailable)
-			throw new ParseError(16, "Video is unavailable!", false);
+			throw new PlaybackError(10, "Video is unavailable!", false);
 		if (yt_video.blocked)
-			throw new MDError(11, "Video is blocked in your country!", false);
+			throw new PlaybackError(11, "Video is blocked in your country!", false);
 		if (yt_video.ageRestricted) 
-			throw new MDError(12, "Video is age restricted!", false);
-		if (yt_video.status != "OK") 
-			throw new MDError(13, "Playability Status: " + yt_video.status, false);
+			throw new PlaybackError(12, "Video is age restricted!", false);
+		if (yt_video.status != "OK")
+			throw new PlaybackError(13, "Playability Status: " + yt_video.status, false);
+		if (yt_page.playerConfigFound && !yt_page.playerConfigParsed)
+			throw new ParseError(101, "Failed to parse player config!");
 		if (yt_video.streams.length == 0)
-			throw new MDError(17, "Failed to parse streams!");
+			throw new ParseError(102, "Failed to parse streams!");
 		console.log("YT Video:", yt_video);
 
 		ct_mediaLoaded();
@@ -850,30 +853,24 @@ function ct_loadMedia () {
 	// Handle different errors while loading
 	.catch(function(error) {
 		if (!error) return; // Silent fail when request has gone stale (new page loaded before this finished)
-		if ((error.name == "TypeError" && error.message.includes("fetch")) || error instanceof NetworkError) {
+		if (error instanceof NetworkError)
 			ct_online = false;
-			cacheLoad.then(function() {
-				if (yt_video.cache != undefined) {
-					console.log("Offline - Cache Fallback!");
-					yt_video.streams = [];
-					ct_mediaLoaded();
-					ct_updatePageState();
-					//ui_setVideoMetadata(); // Already done in cacheLoad
-					ui_setupMediaSession();
-				}
-				else return Promise.reject();
-			}).catch (function() {
-				ct_mediaError(new MDError(14, "Offline: " + error.message, false));
-			});
-		}
-		else {
-			ct_mediaError(error);
-			if (error instanceof MDError) { // Loaded metadata but not ready (streams unavailable)
+		cacheLoad.then(function() {
+			if (yt_video.cache != undefined) {
+				console.log("Error while loading ... Using cache fallback!");
+				yt_video.streams = [];
 				ct_mediaLoaded();
 				ct_updatePageState();
+				//ui_setVideoMetadata(); // Already done in cacheLoad
+				ui_setupMediaSession();
+			} else { // Metadata IS cached
+				ct_updatePageState();
 				ui_setVideoMetadata();
+				ct_mediaError(error);
 			}
-		}
+		}).catch (function() {
+			ct_mediaError(error);
+		});
 	});
 
 	ct_mediaLoad();
@@ -916,7 +913,7 @@ function ct_mediaReady () {
 }
 function ct_mediaError (error) {
 	clearTimeout(md_timerCheckBuffering);
-	if (error instanceof MDError && error.tag && error.tag.src.startsWith(VIRT_CACHE)) {
+	if (error instanceof PlaybackError && error.tag && error.tag.src.startsWith(VIRT_CACHE)) {
 		console.error("Cached media file erroneous! Removing from cache. ", error);
 		md_resetStreams();
 		db_deleteCachedStream(yt_videoID).then (function () {
@@ -927,25 +924,27 @@ function ct_mediaError (error) {
 		});
 		ui_setNotification("vd-" + yt_videoID, 'Cache of ' + yt_videoID + ' is invalid, removed entry!', 5000);
 		return;
-	} else if (error instanceof MDError && error.code == 4) {
+	} else if (error instanceof PlaybackError && error.code == 4) {
 		console.error("Can't play selected stream!");
 		var stream = yt_video.streams.find(s => s.url == error.tag.src);
 		if (stream) stream.unavailable = true;
 		md_updateStreams();
 		return;
 	}
-	md_resetStreams();
-	md_state = State.Error;
-	md_paused = true;
-	md_flags.buffering = false;
-	md_flags.seeking = false;
-	md_errorText = error.message;
-	ui_updatePlayerState();
-
-	if (error instanceof MDError && !error.minor)
-		ct_startAutoplay(8);
-
-	console.error(error.message + " (" + error.name + (error.code? " " + error.code : "") + ")" + (error.tagname? " in " + error.tagname : ""));
+	if (!(error instanceof ParseError && error.minor))
+	{ // Reset media state, unless it's a minor parse error
+		md_resetStreams();
+		md_state = State.Error;
+		md_paused = true;
+		md_flags.buffering = false;
+		md_flags.seeking = false;
+		md_errorText = error.name + ": " + error.status;
+		ui_updatePlayerState();
+	}
+	// Skip video if error isn't minor
+	if (!error.minor) ct_startAutoplay(8);
+	// Debug
+	console.error(error.name + (error.code? " " + error.code : "") + ": " + error.status + (error.tagname? " in " + error.tagname : "") + "  ", error.stack);
 }
 function ct_mediaEnded () {
 	md_pause ();
@@ -1428,7 +1427,7 @@ function db_cacheStream (video, progress) {
 	return fetch(ct_pref.corsAPIHost + stream.url, { headers: { "range": "bytes=0-" }, signal: controller.signal })
 	.then(function(response) {
 		if (!response.ok)
-			return Promise.reject(new NetworkError (response.statusText));
+			return Promise.reject(new NetworkError(response));
 
 		cacheObj.size = parseInt(response.headers.get("content-length"));
 		if (progress && !progress(0, cacheObj.size)) {
@@ -1573,6 +1572,9 @@ function yt_browse (subPath) {
 			console.log("YT Page: ", page);
 			return page;
 		});
+	}).catch(function(error) {
+		if (error.code) throw new NetworkError(undefined, error.message, error.code);
+		else throw new NetworkError(undefined, "No network or CORS access denied!");
 	});
 }
 /* Loads the URL with Youtube Mechanics - response is only a data object without secrets. Browse needs to be called first on any YT page */
@@ -2108,17 +2110,21 @@ function yt_loadVideoData(id, background) {
 			return Promise.reject(); // Request has gone stale
 		if (!background) yt_page = page;
 		video.unavailable = page.unavailable;
+		video.blocked = false;
 		try { // Parse player config
 			if (video.unavailable) throw new Error();
-			var match = page.html.match (/;\s*ytplayer\.config\s*=\s*({.*?});/);
+			var match = page.html.match (/;\s*ytplayer\.config\s*=\s*({.*?});\s*ytplayer/);
 			if (!match) match = page.html.match (/ytInitialPlayerConfig\s*=\s*({.*?});/); // Mobile
+			page.playerConfigFound = match != undefined;
 			page.config = JSON.parse(match[1]);
+			page.playerConfigParsed = page.config != undefined;
 			return page;
 		} catch (e) {
-			if (!page.html.includes('id="player-api"'))
-				return Promise.reject(new ParseError("Failed to parse JSON and no player-api found!"), 21, page.html);
 			// Video blocked or unavailable
 			video.blocked = !video.unavailable;
+			// Check error type
+			if (!page.html.includes('id="player-api"'))
+				return Promise.reject(new ParseError(100, "Failed to parse JSON and no player-api found!"));
 			// Attempt to get metadata through separate request
 			return fetch(ct_pref.corsAPIHost + HOST_YT + "/get_video_info?ps=default&video_id=" + id)
 			.then (function(data) {
@@ -2175,6 +2181,7 @@ function yt_loadVideoData(id, background) {
 }
 function yt_extractVideoMetadata(page, video) {
 	var meta = {};
+	meta.uploader = {};
 
 	try { // Extract primary metadata
 		var videoDetail = page.config.args.player_response.videoDetails;
@@ -2188,7 +2195,7 @@ function yt_extractVideoMetadata(page, video) {
 		};
 		meta.allowRatings = videoDetail.allowRatings;
 		
-	} catch (e) { console.error("Failed to read primary video metadata!", e, page.config.args.player_response); }
+	} catch (e) { ct_mediaError(new ParseError(110, "Failed to read primary video metadata: '" + e.message + "'!", true)); }
 
 	if (!page.initialData) {
 		console.warn("Can't extract video metadata without initial data!", page);
@@ -2226,7 +2233,7 @@ function yt_extractVideoMetadata(page, video) {
 					meta.uploader.subscribers = subButton.text.runs[1]? yt_parseNum(subButton.text.runs[1].text) : 0;
 			}
 
-		} catch (e) { console.error("Failed to read video metadata!", e, page.initialData.contents); }
+		} catch (e) { ct_mediaError(new ParseError(111, "Failed to read desktop video metadata: '" + e.message + "'!", true)); }
 	}
 	/* -- Mobile website -- */
 	else if (page.initialData.contents.singleColumnWatchNextResults) {
@@ -2252,7 +2259,7 @@ function yt_extractVideoMetadata(page, video) {
 			// Subscribers
 			meta.uploader.subscribers = yt_parseNum(yt_parseLabel(uploaderContainer.expandedSubtitle));
 
-		} catch (e) { console.error("Failed to read video metadata!", e, page.initialData.contents); }
+		} catch (e) { ct_mediaError(new ParseError(111, "Failed to read mobile video metadata: '" + e.message + "'!", true)); }
 	}
 
 	try { // Extract uploader metadata
@@ -2262,7 +2269,7 @@ function yt_extractVideoMetadata(page, video) {
 		meta.uploader.userID = meta.uploader.url.startsWith ("/user/")? meta.uploader.url.substring(6) : undefined;
 		meta.uploader.profileImg = yt_selectThumbnail(uploaderContainer.thumbnail.thumbnails);
 		meta.uploader.badge = uploaderContainer.badges && uploaderContainer.badges.length > 0? uploaderContainer.badges[0].metadataBadgeRenderer.tooltip : undefined;
-	} catch (e) { console.error("Failed to read video uploader metadata!", e, page.initialData.contents); }
+	} catch (e) { ct_mediaError(new ParseError(112, "Failed to read video uploader metadata: '" + e.message + "'!", true)); }
 
 	try { // Extract secondary metadata
 		meta.metadata = metadataContainer.metadataRowContainer.metadataRowContainerRenderer.rows?
@@ -2276,7 +2283,7 @@ function yt_extractVideoMetadata(page, video) {
 		}, []) : [];
 		var category = meta.metadata.find(d => d.name == "Category");
 		meta.category = category? category.data : "Unknown";
-	} catch (e) { console.error("Failed to read secondary video metadata!", e, page.initialData.contents); }
+	} catch (e) { ct_mediaError(new ParseError(113, "Failed to read secondary video metadata: '" + e.message + "'!", true)); }
 
 	return meta;
 }
@@ -2317,7 +2324,7 @@ function yt_loadMoreRelatedVideos (pagedContent) {
 	PAGED_REQUEST(pagedContent, "POST", requestURL, true, function(relatedData) {
 		// Parsing
 		try { pagedContent.data.lastPage = JSON.parse(relatedData)[1]; 
-		} catch (e) { console.error("Failed to extract related video data!", e, { relatedData: relatedData }); return; }		
+		} catch (e) { ct_mediaError(new ParseError(120, "Failed to parse related video data: '" + e.message + "'!", true)); return; }
 		yt_updateNavigation(pagedContent.data.lastPage);
 		
 		if (!pagedContent.data.lastPage.response.continuationContents)
@@ -2356,7 +2363,7 @@ function yt_extractRelatedVideosObject (videos, results, extData) {
 				itctToken: v.navigationEndpoint.clickTrackingParams,
 			};
 			var uLink = v.shortBylineText.runs[0].navigationEndpoint.browseEndpoint;
-			relVid.uploader =  { 
+			relVid.uploader = { 
 				name: yt_parseLabel(v.shortBylineText), 
 				channelID: uLink.browseId,
 				url: uLink.canonicalBaseUrl? uLink.canonicalBaseUrl : "/channel/" + uLink.browseId,
@@ -2367,7 +2374,7 @@ function yt_extractRelatedVideosObject (videos, results, extData) {
 			};
 			videos.push(relVid); 
 		});
-	} catch (e) { console.error("Failed to extract related videos!", e, results); return; }
+	} catch (e) { ct_mediaError(new ParseError(121, "Failed to extract related videos: '" + e.message + "'!", true)); return; }
 	
 	try { // Load related infos (session data including itct token)
 		var infos = extData.relatedVideoArgs.split(',').forEach(s => {
@@ -2381,7 +2388,7 @@ function yt_extractRelatedVideosObject (videos, results, extData) {
 				//else console.log("Info about non-existant related video:", vidInfo);
 			}
 		});
-	} catch (e) { console.error("Failed to extract additional related video information!", e, results); }
+	} catch (e) { ct_mediaError(new ParseError(122, "Failed to extract additional related video information: '" + e.message + "'!", true)); }
 }
 
 /* -------------------- */
@@ -2393,21 +2400,33 @@ function yt_extractVideoCommentData (initialData) {
 
 	try { // Extract Comments Data
 		var commentData;
-		if (initialData.contents.twoColumnWatchNextResults)
-			commentData = initialData.contents.twoColumnWatchNextResults.results.results.contents.find(c => c.itemSectionRenderer).itemSectionRenderer;
-		else if (initialData.contents.singleColumnWatchNextResults)
-			commentData = initialData.contents.singleColumnWatchNextResults.results.results.contents.find(c => c.commentSectionRenderer).commentSectionRenderer;
-		if (commentData.continuations) {
-			comments.conToken = commentData.continuations[0].nextContinuationData.continuation;
-			comments.itctToken = commentData.continuations[0].nextContinuationData.clickTrackingParams;
-		} else {
+		if (initialData.contents.twoColumnWatchNextResults) {
+			var isr = initialData.contents.twoColumnWatchNextResults.results.results.contents.filter(c => c.itemSectionRenderer);
+			isr = isr.map(c => c.itemSectionRenderer);
+			if (isr.length > 1) isr = isr.filter(c => c.sectionIdentifier && c.sectionIdentifier.includes("comment"));
+			commentData = isr.length > 0? isr[0] : null;
+		}
+		else if (initialData.contents.singleColumnWatchNextResults) {
+			var csr = initialData.contents.singleColumnWatchNextResults.results.results.contents.filter(c => c.commentSectionRenderer);
+			csr = csr.map(c => c.commentSectionRenderer);
+			if (csr.length > 1) csr = csr.filter(c => c.sectionIdentifier && c.sectionIdentifier.includes("comment")); // TODO: Check if needed
+			commentData = csr.length > 0? csr[0] : null;
+		}
+		if (commentData) {
+			if (commentData.continuations) {
+				comments.conToken = commentData.continuations[0].nextContinuationData.continuation;
+				comments.itctToken = commentData.continuations[0].nextContinuationData.clickTrackingParams;
+			} else {
+				comments.deactivated = true;
+			}
+			if (commentData.header) { // Mobile only
+				comments.count = yt_parseNum(commentData.header.commentSectionHeaderRenderer.countText.runs[1].text);
+				comments.sorted = "TOP"; // No way to select sorting on mobile website (only on app)
+			}
+		}else {
 			comments.deactivated = true;
 		}
-		if (commentData.header) { // Mobile only
-			comments.count = yt_parseNum(commentData.header.commentSectionHeaderRenderer.countText.runs[1].text);
-			comments.sorted = "TOP"; // No way to select sorting on mobile website (only on app)
-		}
-	} catch (e) { console.error("Failed to extract comment data!", e, initialData); }
+	} catch (e) { ct_mediaError(new ParseError(130, "Failed to extract video comment data: '" + e.message + "'!", true)); }
 	
 	comments.comments = [];
 	return comments;
@@ -2445,7 +2464,7 @@ function yt_loadMoreComments (pagedContent) {
 	PAGED_REQUEST(pagedContent, "POST", requestURL, true, function(commentData) {
 		// Parsing
 		try { yt_video.comments.lastPage = JSON.parse(commentData); 
-		} catch (e) { console.error("Failed to get comment data!", e, { commentData: commentData }); return; }		
+		} catch (e) { ct_mediaError(new ParseError(131, "Failed to parse received comment data: '" + e.message + "'!", true)); return; }
 		if (isReplyRequest || !yt_page.isDesktop) yt_video.comments.lastPage = yt_video.comments.lastPage[1];
 		yt_updateNavigation(yt_video.comments.lastPage);
 
@@ -2472,7 +2491,7 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 			commentData.conTokenTop = sortList[0].continuation.reloadContinuationData.continuation;
 			commentData.conTokenNew = sortList[1].continuation.reloadContinuationData.continuation;
 			commentData.sorted = sortList[0].selected? "TOP" : "NEW";
-		} catch (e) { console.error("Failed to extract comment header!", e, commentData); }
+		} catch (e) { ct_mediaError(new ParseError(132, "Failed to extract comment header: '" + e.message + "'!", true)); }
 	} // Only in first main request, never reply requests
 
 	if (contents.contents || contents.items) {
@@ -2506,12 +2525,12 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 				}
 				comments.push(comment);
 			});
-		} catch (e) { console.error("Failed to extract comments!", e, commentData); }
+		} catch (e) { ct_mediaError(new ParseError(133, "Failed to extract comments: '" + e.message + "'!", true)); }
 	}
 
 	try {
 		commentData.conToken = contents.continuations? contents.continuations[0].nextContinuationData.continuation : undefined;
-	} catch (e) { console.error("Failed to extract comment continuation!", e, commentData); }
+	} catch (e) { ct_mediaError(new ParseError(134, "Failed to extract comment continuations: '" + e.message + "'!", true)); }
 }
 
 /* ------------------------------------------------- */
@@ -2535,10 +2554,12 @@ function yt_decodeStreams (config) {
 	}
 	// Read legacy and adaptive formats by combining object and raw string data, latter being the primary source
 	var strData = config.args.player_response.streamingData;
-	var legacyStreams = Object.assign(strData? strData.formats : {}, 
-		(config.args.url_encoded_fmt_stream_map || "").split (',').map(parseStreams));
-	var adaptiveStreams = Object.assign(strData? strData.adaptiveFormats : {}, 
-		(config.args.adaptive_fmts || "").split (',').map(parseStreams));
+	var legacyStreams = (strData? strData.formats || [] : []).concat(
+			config.args.url_encoded_fmt_stream_map? 
+				config.args.url_encoded_fmt_stream_map.split(',').map(parseStreams) : []);
+	var adaptiveStreams = (strData? strData.adaptiveFormats || [] : []).concat(
+			config.args.adaptive_fmts? 
+				config.args.adaptive_fmts.split(',').map(parseStreams) : []);
 	var streams = (legacyStreams || []).concat(adaptiveStreams || []);
 	// Get sign function if required (async in case it's not yet cached)
 	return new Promise (function (resolve, reject) {
@@ -2629,7 +2650,7 @@ function yt_decodeStreams (config) {
 			}
 
 			// ITag Data
-			stream.isLive = ITAGS[itag].hls || false;
+			stream.isLive = ITAGS[itag].hls || stream.url.includes("&live=1");
 			stream.isStereo = ITAGS[itag].ss3D || false;
 
 			// Format
@@ -2861,7 +2882,7 @@ function ui_setPoster () {
 }
 
 function ui_setupMediaSession () {
-	if (navigator.mediaSession && yt_video && yt_video.loaded) {
+	if (navigator.mediaSession && yt_video && yt_video.loaded && yt_video.meta.thumbnailURL) {
 		navigator.mediaSession.metadata = new MediaMetadata ({
 			title: yt_video.meta.title,
 			artist: yt_video.meta.uploader.name,
@@ -3108,7 +3129,7 @@ function ui_setVideoMetadata() {
 		link.href = ct_getNavLink(uploaderNav);
 	});
 	I("vdUploaderName").innerText = yt_video.meta.uploader.name;
-	I("vdUploadDate").innerText = "Uploaded on " + ui_formatDate(yt_video.meta.uploadedDate);
+	I("vdUploadDate").innerText = yt_video.meta.uploadedDate? "Uploaded on " + ui_formatDate(yt_video.meta.uploadedDate) : "Live";
 	if (yt_video.loaded) {
 		var uploaderImg = I("vdUploaderImg");
 		uploaderImg.src = yt_video.meta.uploader.profileImg;
@@ -3118,10 +3139,13 @@ function ui_setVideoMetadata() {
 		setDisplay("vdTextContainer", "");
 
 		var container = I("vdMetadata");
-		yt_video.meta.metadata.forEach(m => {
-			container.insertAdjacentHTML("beforeEnd", "<span>" + m.name + ":</span>");
-			container.insertAdjacentHTML("beforeEnd", "<span>" + m.data + "</span>");
-		});
+		if (yt_video.meta.metadata)
+		{
+			yt_video.meta.metadata.forEach(m => {
+				container.insertAdjacentHTML("beforeEnd", "<span>" + m.name + ":</span>");
+				container.insertAdjacentHTML("beforeEnd", "<span>" + m.data + "</span>");
+			});
+		}
 		if (yt_video.meta.credits) {
 			yt_video.meta.credits.forEach(m => {
 				container.insertAdjacentHTML("beforeEnd", "<span>" + m.name + ":</span>");
@@ -3137,7 +3161,7 @@ function ui_setVideoMetadata() {
 		setDisplay("vdTextContainer", "none");
 	}
 
-	if (yt_video.loaded && ct_pref.loadComments)
+	if (yt_video.ready && ct_pref.loadComments)
 	{
 		sec_comments.style.display = "block";
 		if (!yt_page.isDesktop) // can't sort comments on mobile
@@ -4286,11 +4310,11 @@ function onKeyUp (keyEvent) {
 /* -------------------- */
 
 function onMediaAbort () {
-	ct_mediaError(new MDError(10, this.tagName + " aborted!", true, this));
+	ct_mediaError(new PlaybackError(5, this.tagName + " aborted!", true, this));
 }
 function onMediaError (event) {
-	if (event.target.error.message != "MEDIA_ELEMENT_ERROR: Empty src attribute")  {
-		ct_mediaError(new MDError(event.target.error.code, event.target.error.message, true, event.target));
+	if (event.target.error.message != "MEDIA_ELEMENT_ERROR: Empty src attribute") {
+		ct_mediaError(new PlaybackError(event.target.error.code, event.target.error.message, true, event.target));
 	}
 }
 function onMediaStalled () {
@@ -4402,7 +4426,7 @@ function md_updateStreams ()  {
 		md_sources.audio = '';
 	}
 	if (!md_sources.video && !md_sources.audio) {
-		ct_mediaError(new MDError(15, "No media sources available!", false));
+		ct_mediaError(new PlaybackError(6, "No media sources available!", false));
 		return;
 	}
 	ui_updateStreamState(selectedStreams);
@@ -4486,7 +4510,7 @@ function md_checkBuffering(forceBuffer) {
 	if (md_attemptPlayStarted) return;
 	if (!md_sources) return;
 	if (!md_sources.video && !md_sources.audio) {
-		ct_mediaError(new MDError(15, "No media sources available!", false));
+		ct_mediaError(new PlaybackError(6, "No media sources available!", false));
 		return;
 	}
 	if (md_paused || md_flags.buffering) { // Assure times are synced
@@ -4676,26 +4700,31 @@ function md_assureSync () {
 //region
 
 class ParseError extends Error {
-	constructor (code, message, object) {
-		super (message);
-		this.name = "ParseError";
+	constructor (code, message, minor, object) {
+		super("");
+		this.status = message;
+		this.name = "Parse Error";
 		this.code = code;
+		this.minor = minor || false;
 		this.object = object;
 	}
 }
-class MDError extends Error {
+class PlaybackError extends Error {
 	constructor (code, message, minor, tag) {
-		super(message);
+		super("");
+		this.status = message;
+		this.name = "Playback Error";
 		this.code = code;
 		this.minor = minor;
 		this.tag = tag;
 	}
 }
 class NetworkError extends Error {
-	constructor (response) {
-		super(response.statusText);
-		this.name = "NetworkError";
-		this.code = response.status;
+	constructor (response, message, code) {
+		super("");
+		this.status = response? response.statusText : message;
+		this.name = "Network Error";
+		this.code = response? response.status : code;
 	}
 }
 
@@ -4725,7 +4754,7 @@ function PAGED_REQUEST (pagedContent, method, url, authenticate, callback, supre
 		} else // End reached, remove
 			ct_removePagedContent(pagedContent.id);
 	}).catch (function (error) {
-		console.error("Request failed: ", error);
+		console.error("Paged request failed: ", error);
 	});
 }
 
