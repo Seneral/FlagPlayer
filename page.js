@@ -2150,10 +2150,10 @@ function yt_loadVideoData(id, background) {
 		video.status = status.status == "OK"? "OK" : (status.status + ": " + status.reason);
 
 		// Extract metadata
-		if (video.unavailable)
-			video.meta = {};
-		else
+		if (!video.unavailable)
 			video.meta = yt_extractVideoMetadata(page);
+		else if (!video.meta)
+			video.meta = {};
 
 		if (!video.blocked && !video.unavailable) {
 			// Extract related videos
@@ -4420,7 +4420,8 @@ function md_updateStreams ()  {
 	if (md_pref.dash) {
 		md_sources.video = selectedStreams.dashVideo? selectedStreams.dashVideo.url : '';
 		md_sources.audio = yt_video.cache && (ct_pref.cacheForceUse || !ct_online)? yt_video.cache.url 
-			: (selectedStreams.dashAudio? selectedStreams.dashAudio.url : '');
+			: (selectedStreams.dashAudio? selectedStreams.dashAudio.url
+					: (yt_video.cache? yt_video.cache.url : ''));
 	} else {
 		md_sources.video = selectedStreams.legacyVideo? selectedStreams.legacyVideo.url : '';
 		md_sources.audio = '';
