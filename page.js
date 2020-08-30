@@ -1416,7 +1416,7 @@ function db_cacheStream (video, progress) {
 	if (!("serviceWorker" in navigator) || !sw_current) return Promise.reject({ message: "No Service Worker - reload!"});
 
 	var cacheID = video.videoID;
-	var stream = md_selectStream(md_selectableStreams(video).dashAudio, ct_pref.cacheAudioQuality, md_daVal);
+	var stream = md_selectStream(md_selectableStreams(video, true).dashAudio, ct_pref.cacheAudioQuality, md_daVal);
 	var cacheObj = { 
 		url: VIRT_CACHE + cacheID,
 		quality: stream.aBR,
@@ -4370,18 +4370,18 @@ function md_dvVal (s) { return (s.vResY * 100 + s.vFPS) * 2 + (s.container == md
 function md_daVal (s) { return s.aBR; }
 function md_lvVal (s) { return s.vResY; }
 
-function md_selectableStreams (video) {
+function md_selectableStreams (video, includeUnavailable = false) {
 	if (!video || !video.ready) return undefined;
 	// Return streams available in each category sorted from best to worst
 	var streams = {};
 	streams.dashVideo = video.streams
-		.filter(s => !s.unavailable && s.isDash && s.hasVideo && videoMedia.canPlayType(s.mimeType))
+		.filter(s => (!s.unavailable || includeUnavailable) && s.isDash && s.hasVideo && videoMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_dvVal(s1) > md_dvVal(s2)? -1 : 1);
 	streams.dashAudio = video.streams
-		.filter(s => !s.unavailable && s.isDash && s.hasAudio && audioMedia.canPlayType(s.mimeType))
+		.filter(s => (!s.unavailable || includeUnavailable) && s.isDash && s.hasAudio && audioMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_daVal(s1) > md_daVal(s2)? -1 : 1);
 	streams.legacyVideo = video.streams
-		.filter(s => !s.unavailable && !s.isDash && videoMedia.canPlayType(s.mimeType))
+		.filter(s => (!s.unavailable || includeUnavailable) && !s.isDash && videoMedia.canPlayType(s.mimeType))
 		.sort((s1, s2) =>  md_daVal(s1) > md_daVal(s2)? -1 : 1);
 	return streams;
 }
