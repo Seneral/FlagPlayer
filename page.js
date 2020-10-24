@@ -857,7 +857,8 @@ function ct_loadMedia () {
 			ct_online = false;
 		cacheLoad.then(function() {
 			if (yt_video.cache != undefined) {
-				console.log("Error while loading ... Using cache fallback!");
+				console.error(error.name + (error.code? " " + error.code : "") + ": " + error.status + "  ", error.stack);
+				console.warn("Error while loading ... Using cache fallback!");
 				yt_video.streams = [];
 				ct_mediaLoaded();
 				ct_updatePageState();
@@ -2148,6 +2149,9 @@ function yt_loadVideoData(id, background) {
 		// Check playability (blocked, age restricted, etc.)
 		var status = page.config.args.player_response.playabilityStatus;
 		video.status = status.status == "OK"? "OK" : (status.status + ": " + status.reason);
+		// Complement assets if missing
+		if (!page.config.assets)
+			page.config.assets = { js: page.html.match (/<script\s+src=\"(.*?)\"\s+type=\"text\/javascript\"\s+name=\"player_ias\/base\"/)[1] };
 
 		// Extract metadata
 		if (!video.unavailable)
