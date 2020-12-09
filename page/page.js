@@ -831,10 +831,8 @@ function ct_loadMedia () {
 			throw new PlaybackError(12, "Video is age restricted!", false);
 		if (yt_video.status != "OK")
 			throw new PlaybackError(13, "Playability Status: " + yt_video.status, false);
-		if (yt_page.playerConfigFound && !yt_page.playerConfigParsed)
-			throw new ParseError(101, "Failed to parse player config!");
 		if (yt_video.streams.length == 0)
-			throw new ParseError(102, "Failed to parse streams!");
+			throw new ParseError(103, "Failed to parse streams!");
 		console.log("YT Video:", yt_video);
 
 		ct_mediaLoaded();
@@ -1524,18 +1522,29 @@ function yt_browse (subPath) {
 			var page = {};
 			page.html = html;
 			page.isDesktop = true;
-
 			try { 
-				var match = page.html.match (/window\["ytInitialData"\]\s*=\s*({.*?});/);
+				var initialDataRaw;
+				var match = page.html.match (/var\s*ytInitialData\s*=\s*({.*?});/);
+				if (!match)
+					match = page.html.match (/window\["ytInitialData"\]\s*=\s*({.*?});/);
 				if (!match) {
-					match = page.html.match (/<div\s+id="initial-data">\s*<!--\s*({.*?})\s*-->\s*<\/div>/);
+					match = page.html.match (/var\s*ytInitialData\s*=\s*'(.*?)';/);
+					if (match)
+					{ // Do manual decodeURIComponent except that \x** is used instead of %** (although there are also those used within the text)
+						initialDataRaw = match[1].replace(/\\x[0-9A-Fa-f]{2}/g, (m) => {
+							return String.fromCharCode(parseInt(m.substring(2, 5), 16));
+						});
+						initialDataRaw = initialDataRaw.replace(/\\(.)/g, "$1");
+					}
+					else
+						match = page.html.match (/<div\s+id="initial-data">\s*<!--\s*({.*?})\s*-->\s*<\/div>/);
 					if (match) page.isDesktop = false;
 				}
-				page.initialData = JSON.parse(match[1]); 
-			} catch (e) { console.error("Failed to get initial data!", e); }
+				page.initialData = JSON.parse(initialDataRaw? initialDataRaw : match[1]);
+			} catch (e) { console.error(page.error = "Failed to get initial data!", e); }
 
 			try { page.configParams = JSON.parse(page.html.match (/ytcfg\.set\s*\(({.*?})\);/)[1]); 
-			} catch (e) { console.error("Failed to get config params!", e); }
+			} catch (e) { console.error(page.error = "Failed to get config params!", e); }
 
 			// Check if cors host is used
 			if (ct_isAdvancedCorsHost == undefined)
@@ -1551,20 +1560,23 @@ function yt_browse (subPath) {
 			page.secrets = {};
 			
 			// Always changing, required for ID and XSRF
-			page.secrets.csn = page.initialData.responseContext.webResponseContextExtensionData.ytConfigData.csn;
+			page.secrets.csn = page.initialData? page.initialData.responseContext.webResponseContextExtensionData.ytConfigData.csn : undefined;
 			// Randomly generated
 			page.secrets.cpn = yt_generateCPN();
 
-			page.secrets.xsrfToken = page.configParams.XSRF_TOKEN;
-			// Just some data that is used in requests (but actually works without)
-			page.secrets.idToken = page.configParams.ID_TOKEN;
-			page.secrets.innertubeAPIKey = page.configParams.INNERTUBE_API_KEY;
-			page.secrets.visitorData = page.configParams.VISITOR_DATA;
-			page.secrets.clientName = page.configParams.INNERTUBE_CONTEXT_CLIENT_NAME;
-			page.secrets.clientVersion = page.configParams.INNERTUBE_CONTEXT_CLIENT_VERSION;
-			page.secrets.pageCL = page.configParams.PAGE_CL;
-			page.secrets.pageLabel = page.configParams.PAGE_BUILD_LABEL;
-			page.secrets.variantsChecksum = page.configParams.VARIANTS_CHECKSUM;
+			if (page.configParams)
+			{
+				page.secrets.xsrfToken = page.configParams.XSRF_TOKEN;
+				// Just some data that is used in requests (but actually works without)
+				page.secrets.idToken = page.configParams.ID_TOKEN;
+				page.secrets.innertubeAPIKey = page.configParams.INNERTUBE_API_KEY;
+				page.secrets.visitorData = page.configParams.VISITOR_DATA;
+				page.secrets.clientName = page.configParams.INNERTUBE_CONTEXT_CLIENT_NAME;
+				page.secrets.clientVersion = page.configParams.INNERTUBE_CONTEXT_CLIENT_VERSION;
+				page.secrets.pageCL = page.configParams.PAGE_CL;
+				page.secrets.pageLabel = page.configParams.PAGE_BUILD_LABEL;
+				page.secrets.variantsChecksum = page.configParams.VARIANTS_CHECKSUM;
+			}
 			
 			page.cookies = {};
 			if (ct_isAdvancedCorsHost)
@@ -2113,19 +2125,25 @@ function yt_loadVideoData(id, background) {
 		video.unavailable = page.unavailable;
 		video.blocked = false;
 		try { // Parse player config
-			if (video.unavailable) throw new Error();
-			var match = page.html.match (/;\s*ytplayer\.config\s*=\s*({.*?});\s*ytplayer/);
-			if (!match) match = page.html.match (/ytInitialPlayerConfig\s*=\s*({.*?});/); // Mobile
-			page.playerConfigFound = match != undefined;
+			if (page.error || video.unavailable) throw new Error();
+			var match = page.html.match (/ytInitialPlayerResponse\s*=\s*({.*?});/);
+			if (!match)
+				match = page.html.match (/ytInitialPlayerConfig\s*=\s*({.*?});/); // Mobile
+			if (!match)
+				match = page.html.match (/;\s*ytplayer\.config\s*=\s*({.*?});\s*ytplayer/);
+			if (!match)
+				return Promise.reject(new ParseError(101, "Failed to find player config!"));
 			page.config = JSON.parse(match[1]);
-			page.playerConfigParsed = page.config != undefined;
+			if (!page.config)
+				return Promise.reject(new ParseError(102, "Failed to parse player config!"));
 			return page;
 		} catch (e) {
+			return Promise.reject(new ParseError(100, page.error? page.error : "Failed to load video!"));
 			// Video blocked or unavailable
-			video.blocked = !video.unavailable;
+			//video.blocked = !video.unavailable; // TODO: Find some actual clues
 			// Check error type
 			if (!page.html.includes('id="player-api"'))
-				return Promise.reject(new ParseError(100, "Failed to parse JSON and no player-api found!"));
+				return Promise.reject(new ParseError(100, "Failed to load video and no player-api found!"));
 			// Attempt to get metadata through separate request
 			return fetch(ct_pref.corsAPIHost + HOST_YT + "/get_video_info?ps=default&video_id=" + id)
 			.then (function(data) {
@@ -2142,17 +2160,27 @@ function yt_loadVideoData(id, background) {
 	})
 	// Process video data
 	.then (function (page) {
-		// Parse player response
-		page.config.args.player_response = JSON.parse(page.config.args.player_response);
 		// Check age restriction
 		video.ageRestricted = page.html.indexOf("og:restrictions:age") != -1;
+		// Parse player response
+		if (page.config.args && page.config.args.player_response) {
+			page.config.args.player_response = JSON.parse(page.config.args.player_response);
+			page.config.playabilityStatus = page.config.args.player_response.playabilityStatus;
+			page.config.videoDetails = page.config.args.player_response.videoDetails;
+			page.config.streamingData = page.config.args.player_response.streamingData;
+		}
 		// Check playability (blocked, age restricted, etc.)
-		var status = page.config.args.player_response.playabilityStatus;
+		var status = page.config.playabilityStatus;
 		video.status = status.status == "OK"? "OK" : (status.status + ": " + status.reason);
 		// Complement assets if missing
+		if (!page.config.assets && page.configParams.PLAYER_JS_URL)
+		    page.config.assets = { js: page.configParams.PLAYER_JS_URL }
+		if (!page.config.assets) {
+			var baseMatch = page.html.match (/<script\s+src=\"(.*?)\"\s+type=\"text\/javascript\"\s+name=\"player_ias\/base\"/);
+			if (baseMatch) page.config.assets = { js: baseMatch[1] };
+		}
 		if (!page.config.assets)
-			page.config.assets = { js: page.html.match (/<script\s+src=\"(.*?)\"\s+type=\"text\/javascript\"\s+name=\"player_ias\/base\"/)[1] };
-
+			console.error("Could not fined base.js URL!");
 		// Extract metadata
 		if (!video.unavailable)
 			video.meta = yt_extractVideoMetadata(page);
@@ -2188,7 +2216,7 @@ function yt_extractVideoMetadata(page, video) {
 	meta.uploader = {};
 
 	try { // Extract primary metadata
-		var videoDetail = page.config.args.player_response.videoDetails;
+		var videoDetail = page.config.videoDetails;
 		meta.title = videoDetail.title;
 		meta.description = yt_parseText(videoDetail.shortDescription);
 		meta.thumbnailURL = yt_selectThumbnail(videoDetail.thumbnail.thumbnails);
@@ -2557,13 +2585,13 @@ function yt_decodeStreams (config) {
 		return stream;
 	}
 	// Read legacy and adaptive formats by combining object and raw string data, latter being the primary source
-	var strData = config.args.player_response.streamingData;
-	var legacyStreams = (strData? strData.formats || [] : []).concat(
-			config.args.url_encoded_fmt_stream_map? 
-				config.args.url_encoded_fmt_stream_map.split(',').map(parseStreams) : []);
-	var adaptiveStreams = (strData? strData.adaptiveFormats || [] : []).concat(
-			config.args.adaptive_fmts? 
-				config.args.adaptive_fmts.split(',').map(parseStreams) : []);
+	var strData = config.streamingData;
+	var legacyStreams = strData? strData.formats || [] : [];
+	if (config.args && config.args.url_encoded_fmt_stream_map)
+		legacyStreams = legacyStreams.concat(config.args.url_encoded_fmt_stream_map.split(',').map(parseStreams));
+	var adaptiveStreams = strData? strData.adaptiveFormats || [] : [];
+	if (config.args && config.args.adaptive_fmts)
+		adaptiveStreams = adaptiveStreams.concat(config.args.adaptive_fmts.split(',').map(parseStreams));
 	var streams = (legacyStreams || []).concat(adaptiveStreams || []);
 	// Get sign function if required (async in case it's not yet cached)
 	return new Promise (function (resolve, reject) {
