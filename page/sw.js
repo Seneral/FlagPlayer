@@ -1,4 +1,4 @@
-var VERSION = 15;
+var VERSION = 16;
 var APP_CACHE = "flagplayer-cache-1";
 var IMG_CACHE = "flagplayer-thumbs";
 var MEDIA_CACHE = "flagplayer-media";
@@ -80,7 +80,8 @@ self.addEventListener('fetch', function(event) {
 		event.respondWith(caches.match("./index.html"));
 	}
 	else if (url.includes(VIRT_CACHE)) { // Try to read from the media cache
-		var pos = Number(/^bytes\=(\d+)\-$/g.exec(event.request.headers.get('range'))[1]);
+		var bytes = /^bytes\=(\d+)\-$/g.exec(event.request.headers.get('range'));
+		var pos = Number(bytes? bytes[1] : 0);
 		event.respondWith(
 			caches.open("flagplayer-media")
 			.then(function(cache) {
