@@ -1,4 +1,4 @@
-var VERSION = 15;
+var VERSION = 16;
 var APP_CACHE = "flagplayer-cache-1";
 var IMG_CACHE = "flagplayer-thumbs";
 var MEDIA_CACHE = "flagplayer-media";
