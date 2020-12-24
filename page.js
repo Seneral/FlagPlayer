@@ -2197,7 +2197,8 @@ function yt_loadVideoData(id, background) {
 			.then (function (streams) {
 				video.streams = streams;
 				return page;
-			}).catch (function () {
+			}).catch (function (error) {
+				console.error("Failed to load streams: " + error);
 				video.streams = [];
 				return page;
 			});
@@ -2677,7 +2678,7 @@ function yt_decodeStreams (config) {
 			var itag = s.itag;
 			if (itag == undefined) continue; // Yes these pop up recently
 			else if (ITAGS[itag] == undefined) {
-				console.error("Unknown stream ITag '" + itag + "' (" + config.args.loaderUrl + ")");
+				console.error("Unknown stream ITag '" + itag + "'");
 				continue;
 			}
 
