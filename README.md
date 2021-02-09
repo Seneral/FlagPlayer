@@ -54,7 +54,7 @@ Useful for development, but all ServiceWorker features (audio caching, etc) are 
 2. Install [node.js](https://nodejs.org)
 3. On Windows: Execute /server/CorsServer.bat
 4. On Linux: Execute /server/CorsServer.sh
-5. Note your local server adress as displayed in the console, usually http://localhost:8080
+5. Note your local server adress as displayed in the console, usually http://localhost:26060
 6. Open the settings in FlagPlayer (gear top right)
 7. Enter local server adress into the Cors Server field
 

@@ -5,7 +5,7 @@
 2. Install [node.js](https://nodejs.org)
 3. Execute /server/Setup.bat (Windows) or /server/Setup.sh (Linux)
 4. Execute /server/CorsServer.bat (Windows) or /server/CorsServer.sh (Linux)
-5. Note your local server adress as displayed in the console, usually http://localhost:8080
+5. Note your local server adress as displayed in the console, usually http://localhost:26060
 6. Open the settings in FlagPlayer (gear top right)
 7. Enter local server adress into the Cors Server field
 
