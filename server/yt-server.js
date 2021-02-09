@@ -1,8 +1,18 @@
-var checkRateLimit = require('./lib/rate-limit')('500 5');
+// Listen on a specific host via the HOST environment variable
+var host = process.env.HOST || 'localhost';
+// Listen on a specific port via the PORT environment variable
+var port = process.env.PORT || 26060;
 
-originWhitelist = [ 'https://flagplayer.seneral.dev', 'https://www.seneral.dev' ];
-if (process.env.HEROKU_LOCAL) // Only specified in local .env file
-    originWhitelist.push('null'); // Allow local copies to access local heroku server
+if (process.env.IS_PUBLIC)
+{ // Set on official heroku host
+    originWhitelist = [ 'https://flagplayer.seneral.dev', 'https://www.seneral.dev' ];
+    checkRateLimit = require('./lib/rate-limit')('5000 5');
+}
+else
+{ // Default when hosting locally
+    originWhitelist = []; // Allow local copies to access local heroku server
+    checkRateLimit = undefined;
+}
 
 var cors_proxy = require('./lib/cors-anywhere');
 cors_proxy.createServer({
@@ -27,6 +37,6 @@ cors_proxy.createServer({
     httpProxyOptions: {
         xfwd: true,
     },
-}).listen(process.env.PORT, function() {
-  console.log('Running CORS YT on ' + process.env.PORT);
+}).listen(port, function() {
+  console.log('Running CORS YT on ' + host + ':' + port);
 });
