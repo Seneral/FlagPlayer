@@ -2093,7 +2093,7 @@ function yt_loadChannelPageUploads(pagedContent) {
 	});
 }
 function yt_parseChannelPageVideos (videos) {
-	return videos.map(function (v) {
+	return videos.filter(v => v.gridVideoRenderer || v.compactVideoRenderer).map(function (v) {
 		v = v.gridVideoRenderer || v.compactVideoRenderer;
 		return { 
 			title: yt_parseLabel(v.title),
