@@ -1,4 +1,12 @@
-var VERSION = 17;
+/*
+FlagPlayer - A lightweight YouTube frontend
+Copyright (C) 2019  Seneral
+
+Licensed under AGPLv3
+See https://github.com/Seneral/FlagPlayer for details
+*/
+
+var VERSION = 18;
 var APP_CACHE = "flagplayer-cache-1";
 var IMG_CACHE = "flagplayer-thumbs";
 var MEDIA_CACHE = "flagplayer-media";
