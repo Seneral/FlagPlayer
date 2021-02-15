@@ -2532,7 +2532,10 @@ function yt_loadTopComments () {
 	if (!yt_video.comments.conTokenTop) return;
 	// Load comments from scratch using conTokenTop
 	ui_resetComments();
-	yt_video.comments.continuation.conToken = conTokenTop;
+	yt_video.comments.continuation = {
+		conToken: yt_video.comments.conTokenTop,
+		itctToken: yt_video.comments.itctToken
+	};
 	ct_registerPagedContent("CM", yt_video.comments.container, yt_loadMoreComments, 100, yt_video.comments, true);
 	ct_checkPagedContent();
 }
@@ -2540,7 +2543,10 @@ function yt_loadNewComments () {
 	if (!yt_video.comments.conTokenNew) return;
 	// Load comments from scratch using conTokenNew
 	ui_resetComments();
-	yt_video.comments.continuation.conToken = conTokenNew;
+	yt_video.comments.continuation = {
+		conToken: yt_video.comments.conTokenNew,
+		itctToken: yt_video.comments.itctToken
+	};
 	ct_registerPagedContent("CM", yt_video.comments.container, yt_loadMoreComments, 100, yt_video.comments, true);
 	ct_checkPagedContent();
 }
@@ -2548,7 +2554,7 @@ function yt_loadCommentReplies (comment, replyContainer) {
 	if (!comment || comment.replyData.count <= comment.replyData.replies.length || !comment.replyData.continuation) return;
 	var pagedContent = ct_getPagedContent("CM" + comment.id);
 	comment.replyData.container = replyContainer;
-	comment.replyData.continuation.itctToken = yt_video.comments.continuation.itctToken;
+	comment.replyData.continuation.itctToken = yt_video.comments.itctToken;
 	if (!pagedContent) pagedContent = ct_registerPagedContent("CM" + comment.id, replyContainer, yt_loadMoreComments, false, comment.replyData, true);
 	ct_triggerPagedContent(pagedContent);
 }
@@ -2639,6 +2645,7 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 		} else {
 			commentData.continuation = undefined;
 		}
+		commentData.itctToken = contents.trackingParams;
 	} catch (e) { ct_mediaError(new ParseError(134, "Failed to extract comment continuations: '" + e.message + "'!", true)); }
 }
 
