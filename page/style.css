@@ -133,6 +133,7 @@ a, a:visited, a:hover, a:active {
 	background-color: var(--ctrl-bg-ter-color);
 	border: 1px solid var(--ctrl-bg-color);
 	color: var(--ctrl-color);
+	width: 100%;
 }
 .searchButton {
 	flex-grow: 0;
