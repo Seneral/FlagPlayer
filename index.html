@@ -10,14 +10,16 @@ See https://github.com/Seneral/FlagPlayer for details
 <html lang="en">
 <head>
 	<title>FlagPlayer</title>
+	<meta name="description" content="A lightweight YouTube Web-App focussed on music playback. Open source, single-page, client-side, simple.">
 	<meta charset="utf-8">
-	<meta name="viewport" content="width=device-width, initial-scale=0.9">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<link rel="manifest" href="manifest.webmanifest">
 	<link rel="icon" href="favicon.ico">
 	<link rel="icon" type="image/png" href="favicon-16.png" sizes="16x16">
 	<link rel="icon" type="image/png" href="favicon-96.png" sizes="96x96">
 	<link rel="icon" type="image/png" href="favicon-192.png" sizes="192x192">
 	<link rel="icon" type="image/png" href="favicon-32.png" sizes="32x32">
+	<link rel="apple-touch-icon" href="favicon-192.png">
 	<link rel="stylesheet" type="text/css" media="screen" href="style.css">
 </head>
 <body class="mobile theme-dark noselect">
@@ -308,7 +310,7 @@ See https://github.com/Seneral/FlagPlayer for details
 							<button class="barAction script dropdown left down" id="videoContextActions">
 								<svg viewBox="6 6 36 36"><use href="#svg_hdots"/></svg>
 								<div class="dropdownContent">
-									<a tabindex="0" class="youtubeLink" href="https://www.youtube.com" target="_blank">Watch on YouTube</a>
+									<a tabindex="0" class="youtubeLink" href="https://www.youtube.com" rel="noopener" target="_blank">Watch on YouTube</a>
 									<span tabindex="0" value="cache">Cache Audio Stream</span>
 									<a tabindex="0" value="linkAudio">Audio Stream</a>
 									<a tabindex="0" value="linkVideo">Video Stream</a>
@@ -379,7 +381,7 @@ See https://github.com/Seneral/FlagPlayer for details
 						<button class="barAction script dropdown left down" id="searchContextActions">
 							<svg viewBox="6 6 36 36"><use href="#svg_hdots"/></svg>
 							<div class="dropdownContent">
-								<a tabindex="0" class="youtubeLink" href="https://www.youtube.com" target="_blank">Search on YouTube</a>
+								<a tabindex="0" class="youtubeLink" href="https://www.youtube.com" rel="noopener" target="_blank">Search on YouTube</a>
 							</div>
 						</button>
 					</div>
@@ -393,7 +395,7 @@ See https://github.com/Seneral/FlagPlayer for details
 						<button class="contextAction script dropdown left down" id="channelContextActions">
 							<svg viewBox="6 6 36 36"><use href="#svg_vdots"/></svg>
 							<div class="dropdownContent">
-								<a tabindex="0" class="youtubeLink" href="https://www.youtube.com" target="_blank">See on YouTube</a>
+								<a tabindex="0" class="youtubeLink" href="https://www.youtube.com" rel="noopener" target="_blank">Visit on YouTube</a>
 							</div>
 						</button>
 						<div class="chProfile">
@@ -544,6 +546,9 @@ See https://github.com/Seneral/FlagPlayer for details
 			<path id="svg_list_filterC" d="M 10,14 v3 h18 v-3 Z m 0,6 v3 h12 v-3 Z m 0,6 v3 h11 v-3 Z m 0,6 v3 h12 v-3 Z M 34,20 Q 24,19 24,28 T 34,36 M34,33 Q 27,34 27,28 T 34,23"></path>
 			<path id="svg_list_update" d="M10,14 v3 h18 v-3 Z m0,6 v3 h12 v-3 Z m0,6 v3 h11 v-3 Z m0,6 v3 h12 v-3 Z M32,20 q-8,0 -8,8 t8,8 t8,-8 h-3 q0,5 -5,5 t-5,-5 t5,-5 Z M32,17 l5,5 -5,5 Z"></path>
 			<path id="svg_list_link" d="M10,14 v3 h6 v-3 Z m0,6 v3 h6 v-3 Z m0,6 v3 h18 v-3 Z m0,6 v3 h18 v-3 Z M20.5,24 18,21.5 27.5,12 30,14.5 Z M19,11 h12 v12 h-3 v-9 h-9 Z"></path>
+			<path id="svg_list_play" d="M10,14 v3 h18 v-3 Z m0,6 v3 h10 v-3 Z m0,6 v3 h10 v-3 Z m0,6 v3 h10 v-3 Z M 23,20 23,36 35,28 Z"></path>
+			<!-- M 19,32 19,16 31,24 Z"></path> -->
+			<!-- M32,20 q-8,0 -8,8 t8,8 t8,-8 h-3 q0,5 -5,5 t-5,-5 t5,-5 Z M32,17 l5,5 -5,5 Z"></path> -->
 			<!-- InPage Icons -->
 			<path id="svg_search" d="M16,16 A 1,1 0 0,0 26,26 M24.5,24.5 A 1,1 0 0,1 17.5,17.5 Z M16,16 A 1,1 0 0,1 26,26 M24.5,24.5 A 1,1 0 0,0 17.5,17.5 Z M26.5,24.5 24.5,26.5 31.5,33.5 33.5,31.5 Z"></path>
 			<path id="svg_like" d="M 8,18 8,38 14,38 14,18 Z M 16,38 34,38 40,24 40,18 28,18 30,10 28,8 16,18 Z"></path>
