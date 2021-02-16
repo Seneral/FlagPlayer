@@ -49,7 +49,7 @@
     }
   ],
   "share_target": {
-    "action": "",
+    "action": "/index.html",
     "method": "GET",
     "params": {
       "title": "shTitle",
