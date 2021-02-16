@@ -161,6 +161,7 @@ var ct_temp = { fullscreen: false, options: false, settings: false, loop: false,
 var ct_pagedContent = []; // id, container, autoTrigger, triggerDistance, aborted, loading, loadFunc, page, data
 var ct_isDesktop;
 var ct_pref = {};
+var ct_shareData = {};
 
 /* MEDIA STATE */
 var State = { None: 0, Loading: 1, PreStart: 2, Started: 3, Ended: 4, Error: 5 }
@@ -375,16 +376,20 @@ function ct_readParameters () {
 	ct_view = params.get("view");
 	yt_playlistID = params.get("list");
 	yt_videoID = params.get("v");
-	yt_channelID = { channel: params.get("c"), user: params.get("u") };
+	yt_channelID = { channel: params.get("ch"), channelName: params.get("c"), user: params.get("u") };
 	yt_searchTerms = params.get("q");
+	ct_shareData = params.get("shURL") || params.get("shText") || params.get("shTitle");
 	// Validate parameters
-	if (yt_videoID && yt_videoID.length != 11) yt_videoID = undefined;
-	if (!yt_channelID.user && (!yt_channelID.channel || yt_channelID.channel.length != 24 || !yt_channelID.channel.startsWith("UC"))) yt_channelID = undefined;
+	if (yt_videoID && yt_videoID.length != 11)
+		yt_videoID = undefined;
+	if (!yt_channelID.user && !yt_channelID.channelName && !(yt_channelID.channel && yt_channelID.channel.length == 24 && yt_channelID.channel.startsWith("UC")))
+		yt_channelID = undefined;
 	yt_searchTerms = yt_searchTerms? decodeURIComponent(yt_searchTerms) : undefined;
 }
 function ct_resetContent () {
 	ct_page = Page.None;
 	ct_view = undefined;
+	ct_shareData = undefined;
 	// Discard main content (not including playlist)
 	ct_resetSearch();
 	ct_resetChannel();
@@ -397,7 +402,10 @@ function ct_resetContent () {
 }
 function ct_loadContent () {
 	// Primary Content
-	if (ct_view == "cache") {
+	if (ct_shareData && ct_shareData.length > 1) {
+		ct_navSearch(ct_shareData, true);
+		return;
+	} else if (ct_view == "cache") {
 		ct_page = Page.Cache;
 		ct_loadCache();
 	} else if (yt_videoID) {
@@ -431,6 +439,9 @@ function ct_updatePageState () { // Update page with new information
 	var url = new URL(window.location.href);
 	var state = history && history.state? history.state : {};
 	yt_url = HOST_YT;
+	url.searchParams.delete("shTitle");
+	url.searchParams.delete("shText");
+	url.searchParams.delete("shURL");
 	
 	if (ct_page == Page.Home)
 		state.title = "Home | FlagPlayer";
@@ -454,15 +465,23 @@ function ct_updatePageState () { // Update page with new information
 		if (yt_channelID.user) {
 			url.searchParams.set("u", yt_channelID.user);
 			url.searchParams.delete("c");
+			url.searchParams.delete("ch");
 			yt_url += "/user/" + yt_channelID.user;
-		} else {
-			url.searchParams.set("c", yt_channelID.channel);
+		} else if (yt_channelID.channelName) {
+			url.searchParams.set("c", yt_channelID.channelName);
 			url.searchParams.delete("u");
+			url.searchParams.delete("ch");
+			yt_url += "/c/" + yt_channelID.channelName;
+		} else if (yt_channelID.channel) {
+			url.searchParams.set("ch", yt_channelID.channel);
+			url.searchParams.delete("u");
+			url.searchParams.delete("c");
 			yt_url += "/channel/" + yt_channelID.channel;
 		}
 	} else { 
-		url.searchParams.delete("c");
 		url.searchParams.delete("u");
+		url.searchParams.delete("c");
+		url.searchParams.delete("ch");
 	}
 	
 	if (ct_page == Page.Search) {
@@ -504,12 +523,13 @@ function ct_getNavLink(navID) {
 function ct_beforeNav () {
 	ct_resetContent();
 }
-function ct_performNav () {
+function ct_performNav (inNewState) {
 	//window.scrollTo(0, 0);
 	document.body.scrollTop = 0;
 	//container.scrollTop = 0;
 	//content.scrollTop = 0;
-	ct_newPageState();
+	if (!inNewState)
+		ct_newPageState();
 	ct_loadContent();
 }
 
@@ -710,15 +730,21 @@ function ct_getVideoPlIndex () { // Return -1 on fail so that pos+1 will be 0
 /* ---- SEARCH --------	*/
 /* -------------------- */
 
-function ct_navSearch(searchTerms) {
+function ct_navSearch(searchTerms, inNewState) {
 	var plMatch = searchTerms.match(/(PL[a-zA-Z0-9_-]{32})/) || searchTerms.match(/list=([a-zA-Z0-9_-]{20,})(?:&|$)/) || searchTerms.match(/^([A-Z]{2}[a-zA-Z0-9_-]{20,})$/);
+	var chMatch = searchTerms.match(/(UC[a-zA-Z0-9_-]{22})/);
+	var cMatch = searchTerms.match(/c\/([a-zA-Z0-9_-]+)/);
+	var uMatch = searchTerms.match(/user\/([a-zA-Z0-9_-]+)/);
 	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/) || searchTerms.match(/^([a-zA-Z0-9_-]{11})$/);
 	if (plMatch) ct_loadPlaylist(plMatch[1]);
 	if (!plMatch || vdMatch) {
 		ct_beforeNav();
 		if (vdMatch) yt_videoID = vdMatch[1];
+		else if (chMatch) yt_channelID = { channel: chMatch[1] };
+		else if (uMatch) yt_channelID = { user: uMatch[1] };
+		else if (cMatch) yt_channelID = { channelName: cMatch[1] };
 		else yt_searchTerms = searchTerms;
-		ct_performNav();
+		ct_performNav(inNewState);
 	}
 }
 function ct_loadSearch() {
@@ -1689,7 +1715,7 @@ function yt_getRequestHeadersBrowser (cookies) {
 	// origin: [delete / x-mode navigate]
 	// cookie: [read from custom x-cookies]
 }
-function yt_getRequestHeadersYoutube (content) {
+function yt_getRequestHeadersYoutube (content, cookies) {
 	if (!yt_page || !yt_page.secrets) return {};
 	return {
 		"accept": "*/*",
@@ -1703,7 +1729,7 @@ function yt_getRequestHeadersYoutube (content) {
 		"x-youtube-page-label": yt_page.secrets.pageLabel,
 		"x-youtube-variants-checksum": yt_page.secrets.variantsChecksum,
 		"x-youtube-utc-offset": "0",
-		"x-cookies": yt_getCookieString(),
+		"x-cookies": cookies? yt_getCookieString() : "",
 		"x-mode": "fetch",
 	};
 	// In addition, the server should set the following unsafe headers for us:
@@ -1782,7 +1808,7 @@ function yt_parseFormattedRuns(runs) {
 		if (t.charAt(0) == '@') {
 			if (r.navigationEndpoint) { // properly tagged by youtube
 				var url = r.navigationEndpoint.browseEndpoint.canonicalBaseUrl;
-				var authorNav = url.startsWith ("/user/")? ("u=" + url.substring(6)) : ("c=" + url.substring(9));
+				var authorNav = url.startsWith ("/user/")? ("u=" + url.substring(6)) : (url.startsWith ("/channel/")? ("ch=" + url.substring(9)) : ("c=" + url.substring(3)));
 				t = "<a href='" + ct_getNavLink(authorNav) + "'>" + t + "</a> ";
 			}
 			else { // Tagged by user, mark first work only
@@ -1799,17 +1825,15 @@ function yt_parseFormattedRuns(runs) {
 function yt_generateContinuationLoader(handleItems, api) {
 	return function (data) {
 		return PAGED_REQUEST(data.continuation, api || "browse")
-		.then(function(contents) {
-			// Parsing
-			try { data.lastPage = JSON.parse(contents); }
-			catch (e) { console.error("Failed to parse continuation data!", e, { continuationResponse: contents }); return; }
+		.then(function(pagedData) {
+			data.lastPage = pagedData;
 			// Extract continuation items
 			var contents, items;
-			if (data.lastPage.continuationContents) { // Mobile
-				contents = data.lastPage.continuationContents.playlistVideoListContinuation;
+			if (pagedData.continuationContents) { // Mobile
+				contents = pagedData.continuationContents.playlistVideoListContinuation;
 				items = contents.contents;
 			} else { // Desktop
-				contents = (data.lastPage.onResponseReceivedActions || data.lastPage.onResponseReceivedEndpoints || data.lastPage.onResponseReceivedCommands)[0]?.appendContinuationItemsAction;
+				contents = (pagedData.onResponseReceivedActions || pagedData.onResponseReceivedEndpoints || pagedData.onResponseReceivedCommands)[0]?.appendContinuationItemsAction;
 				items = contents.continuationItems;
 			}
 			// Extract item list in case they are nested
@@ -1876,7 +1900,7 @@ function yt_loadPlaylistData(listID, background) {
 			if (!background && yt_playlist == playlist)
 				ui_addToPlaylist(playlist.videos.length-newVideos.length);
 		});
-		var checkContinuation = function(hasContinuation){
+		var checkContinuation = function(hasContinuation) {
 			if (hasContinuation) // Spawn another load if continuation exists
 				return loadPage(playlist).then(checkContinuation);
 			else // If end reached, stop chain of loads
@@ -2028,7 +2052,7 @@ function yt_parseSearchResults(itemList) {
 
 function yt_loadChannelData(id, background) {
 	if (!id) return Promise.reject(new TypeError("Channel/User ID " + id + " invalid!"));
-	var channelURL = (id.user? "/user/" + id.user : "/channel/" + id.channel) + "/videos";
+	var channelURL = (id.user? "/user/" + id.user : (id.channel? "/channel/" + id.channel : "/c/" + id.channelName)) + "/videos";
 	var channel = { url: channelURL };
 	if (!background) {
 		yt_channelID = id;
@@ -3240,7 +3264,7 @@ function ui_setVideoMetadata() {
 		I("vdDownvotes").innerText = "---";
 		I("vdSentiment").parentElement.style.display = "none";
 	}
-	var uploaderNav = yt_video.meta.uploader.userID? ("u=" + yt_video.meta.uploader.userID) : ("c=" + yt_video.meta.uploader.channelID);
+	var uploaderNav = yt_video.meta.uploader.userID? ("u=" + yt_video.meta.uploader.userID) : (yt_video.meta.uploader.channelName? ("c=" + yt_video.meta.uploader.channelName) : ("ch=" + yt_video.meta.uploader.channelID));
 	[].forEach.call(document.getElementsByClassName("vdUploadLink"), function (link) {
 		link.setAttribute("navigation", uploaderNav);
 		link.href = ct_getNavLink(uploaderNav);
@@ -3352,7 +3376,7 @@ function ui_addComments (container, comments, startIndex, finished) {
 	for(var i = startIndex; i < comments.length; i++) {
 		var comm = comments[i];
 		commentElements[i] = ht_appendCommentElement(container, 
-			comm.id, comm.author.userID? ("u=" + comm.author.userID) : ("c=" + comm.author.channelID), 
+			comm.id, comm.author.userID? ("u=" + comm.author.userID) : (comm.author.channelName? ("c=" + comm.author.channelName) : ("ch=" + comm.author.channelID)), 
 			comm.author.profileImg, comm.author.name, comm.publishedTimeAgoText, ui_formatText(comm.text), 
 			ui_formatNumber(comm.likes), comm.replyData? comm.replyData.count : undefined);
 	}
@@ -3589,9 +3613,10 @@ function ui_checkPlaylist () {
 	ui_adaptiveListLoad(ht_playlistVideos, yt_playlist.videos.length, ui_plScrollPos, 60, window.innerHeight * 1.5,
 	function (index) {
 		var video = yt_playlist.videos[index];
-		ht_fillVideoPlaceholder(ht_playlistVideos.children[index], index+1, video.videoID, ui_formatTimeText(video.length));
+		ht_fillVideoPlaceholder(ht_playlistVideos.children[index], index+1, video.videoID, video.title, video.uploader.name, ui_formatTimeText(video.length));
 	}, function (index) {
-		ht_clearVideoPlaceholder(ht_playlistVideos.children[index]);
+		var video = yt_playlist.videos[index];
+		ht_clearVideoPlaceholder(ht_playlistVideos.children[index], video.title, video.uploader.name);
 	});
 }
 
@@ -4051,6 +4076,22 @@ function ui_setupEventHandlers () {
 	// Search Bar
 	I("search_categories").onchange = onSearchUpdate;
 	onToggleButton(I("search_hideCompletely"), onSearchUpdate);
+
+	// Media Controls
+	if (navigator.mediaSession) {
+		navigator.mediaSession.setActionHandler('play', function() {
+			ct_mediaPlayPause(false, true);
+		});
+		navigator.mediaSession.setActionHandler('pause', function() {
+			ct_mediaPlayPause(true, true);
+		});
+		navigator.mediaSession.setActionHandler('previoustrack', function() {
+			history.back();
+		});
+		navigator.mediaSession.setActionHandler('nexttrack', function() {
+			ct_nextVideo();
+		});
+	}
 }
 
 //endregion
@@ -4288,7 +4329,8 @@ function onMouseClick (mouse) {
 			switch (match[1]) {
 				case "v":  ct_navVideo(match[2]); break;
 				case "u": ct_navChannel({ user: match[2] }); break;
-				case "c": ct_navChannel({ channel: match[2] }); break;
+				case "c": ct_navChannel({ channelName: match[2] }); break;
+				case "ch": ct_navChannel({ channel: match[2] }); break;
 				case "q": ct_navSearch(match[2]); break;
 				case "list": ct_loadPlaylist(match[2]); break;
 				case "tab": onBrowseTab(match[2]); break;
@@ -4864,14 +4906,12 @@ function PAGED_REQUEST (data, api) {
 		context: {
 			clickTracking: {
 				clickTrackingParams: data.itctToken
-			},
-			clientScreenNonce: yt_page.secrets.csn
+			}
 		}
 	}).then(function (response) {
-		return response.text();
+		return response.json();
 	});
 }
-
 
 // Just a wrapper to facilitate API requests
 function API_REQUEST (api, data) {
@@ -4879,12 +4919,11 @@ function API_REQUEST (api, data) {
 		'clientName': 'WEB',
 		'clientVersion': '2.20201021.03.00'
 	};
-	data.context.clientScreenNonce = "MC44NzA0MTgxMDIyMTk0MTU3"; // originally randomly generated
 	apiBaseURL = "https://www.youtube.com/youtubei/v1/";
 	// Perform request
 	return fetch(ct_pref.corsAPIHost + apiBaseURL + api + "?key=" + yt_page.secrets.innertubeAPIKey, {
 		method: "POST",
-		headers: yt_getRequestHeadersYoutube("application/json"),
+		headers: yt_getRequestHeadersYoutube("application/json", false),
 		body: JSON.stringify(data),
 	});
 }
@@ -4895,7 +4934,7 @@ function AJAX_REQUEST (url, method, authenticate) {
 	return fetch(ct_pref.corsAPIHost + url, {
 		method: method,
 		headers: authenticate? 
-			yt_getRequestHeadersYoutube("application/x-www-form-urlencoded") : 
+			yt_getRequestHeadersYoutube("application/x-www-form-urlencoded", true) : 
 			yt_getRequestHeadersBrowser(false),
 		body: authenticate? "session_token=" + encodeURIComponent(yt_page.secrets.xsrfToken) : undefined,
 	}).then(function (response) {
@@ -4948,37 +4987,30 @@ function ht_getVideoPlaceholder (id, prim, sec) {
 	if (!ht_placeholder) {
 		ht_placeholder = document.createElement("DIV");
 		ht_placeholder.className = "liElement";
-		ht_placeholder.innerHTML = '<div><span></span><span></span></div>';
 	}
 	var placeholder = ht_placeholder.cloneNode(true);
-	placeholder.children[0].children[0].innerText = prim;
-	placeholder.children[0].children[1].innerText = sec;
+	//placeholder.setAttribute("videoID", id);
+	//placeholder.innerText = prim + " " + sec;
 	return placeholder;
 }
-function ht_fillVideoPlaceholder (element, index, id, length) {
+function ht_fillVideoPlaceholder (element, index, id, prim, sec, length) {
 	element.setAttribute("videoID", id);
-	element.children[0].className = "liDetail selectable";
-	element.children[0].children[0].className = "twoline liPrimary";
-	element.children[0].children[1].className = "oneline liSecondary";
-	element.insertAdjacentHTML ("afterBegin",
+	element.innerHTML =
 		'<a class="overlayLink" navigation="v=' + id + '" href="' + ct_getNavLink("v=" + id) + '"></a>' + 
 		'<div class="liIndex">' + index + '</div>' + 
 		'<div class="liThumbnail">' + 
 			'<img class="liThumbnailImg" src="' + HOST_YT_IMG + id + '/default.jpg">' +
 			'<span class="liThumbnailInfo"> ' +  length + ' </span>' +
-		'</div>');
+		'</div>' +
+		'<div class="liDetail selectable">' +
+			'<span class="twoline liPrimary">' + prim + '</span>' + 
+			'<span class="oneline liSecondary">' + sec + '</span>' +
+		'</div>';
 	return element;
 }
-function ht_clearVideoPlaceholder (element) {
-	if (element.firstElementChild.className == "overlayLink") {
-		element.removeChild(element.firstElementChild);
-		element.removeChild(element.firstElementChild);
-		element.removeChild(element.firstElementChild);
-	}
+function ht_clearVideoPlaceholder (element, prim, sec) {
 	element.removeAttribute("videoID");
-	element.children[0].removeAttribute("class");
-	element.children[0].children[0].removeAttribute("class");
-	element.children[0].children[1].removeAttribute("class");
+	//element.innerText = prim + " " + sec;
 	return element;
 }
 function ht_appendVideoElement (container, index, id, length, prim, sec, tert, contextData) {
@@ -5012,6 +5044,7 @@ function ht_appendPlaylistElement (container, id, thumbnailURL, prim, sec, tert)
 			'<a class="overlayLink" navigation="list=' + id + '" href="' + ct_getNavLink("list=" + id) + '"></a>' + 
 			'<div class="liThumbnail">' + 
 				'<img class="liThumbnailImg" src="' + thumbnailURL + '">' +
+				'<span class="liThumbnailInfo"><svg class="icon" width="2em" viewBox="6 8 30 30"><use href="#svg_list_play"/></svg></span>' +
 			'</div>' + 
 			'<div class="liDetail selectable">' + 
 				'<span class="twoline liPrimary">' + prim + '</span>' +
@@ -5073,11 +5106,11 @@ function ht_appendCommentElement (container, commentID, authorNav, authorIMG, au
 		'<div class="cmContainer">' + 
 			'<div class="cmProfileColumn">' +
 				'<a class="overlayLink" tabIndex="-1" navigation="' + authorNav + '" href="' + ct_getNavLink(authorNav) + '"></a>' + 
-				'<img class="cmProfileImg profileImg" src="' + authorIMG + '">' +
+				'<img class="cmProfileImg profileImg" nav src="' + authorIMG + '">' +
 			'</div>' +
 			'<div class="cmContentColumn selectable">' +
 				'<a navigation="' + authorNav + '" href="' + ct_getNavLink(authorNav) + '">' + 
-					'<span class="cmAuthorName oneline">' + authorName + '</span>' +
+					'<span class="cmAuthorName oneline" nav>' + authorName + '</span>' +
 				'</a>' +
 				'<a href="' + yt_url + '&lc=' + commentID + '" target="_blank">' +
 					'<span class="cmPostedDate">' + dateText + '</span>' +

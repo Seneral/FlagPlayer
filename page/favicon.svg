@@ -1,0 +1,7 @@
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 32" x="0px" y="0px" width="48px" height="32px">
+   <g id="svg_logo">
+      <path d="M2,2 38,2 46,16 38,30 2,30 10,16 Z" fill="#f00"> </path>
+      <path d="M18,9 21,9 25,16 21,23 18,23 22,16 Z
+      M24,9 27,9 31,16 27,23 24,23 28,16 Z" fill="#fff"> </path>
+   </g>
+</svg>

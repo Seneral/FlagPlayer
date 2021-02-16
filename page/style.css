@@ -695,6 +695,10 @@ a, a:visited, a:hover, a:active {
 	width: 96px;
 	height: 54px;
 }
+.playlist .liThumbnailImg {
+	width: 96px;
+	height: 54px;
+}
 .playlist .liIndex {
 	line-height: 54px;
 }
