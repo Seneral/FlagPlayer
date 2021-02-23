@@ -2718,14 +2718,14 @@ function yt_decodeStreams (config) {
 				// Get list of functions applied on the cipher in jsSRC code
 				var tFuncCalls = jsSRC.match (/=function\(\w\)\{\w=\w\.split\(""\);(.*?);return \w\.join\(""\)\};/)[1].split(';');
 				// Get name of object containing the function definition and escape it
-				var tFuncObjName = tFuncCalls[0].split('.')[0];
+				var tFuncObjName = tFuncCalls[0].split(/\.|\[\"/)[0];
 				tFuncObjName = tFuncObjName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 				// Get list of function definitions out of the containing object in jsSRC code
 				var tFuncDefs = jsSRC.match(new RegExp("var " + tFuncObjName + "=\\{([\\s\\S]*?)\\};"))[1].split(/,[\n\r]/);
 				// Create mapping between jsSRC function name and sanitized implementation name
 				var transformMap = {};
 				for (var i = 0; i < tFuncDefs.length; i++) {
-					var funcName = tFuncDefs[i].split(':')[0].trim();
+					var funcName = tFuncDefs[i].match(/\"?(\w+)\"?:/)[1];
 					if (tFuncDefs[i].includes("reverse")) transformMap[funcName] = "rv";
 					else if (tFuncDefs[i].includes("splice")) transformMap[funcName] = "sp";
 					else if (tFuncDefs[i].includes("%")) transformMap[funcName] = "sw";
@@ -2734,7 +2734,7 @@ function yt_decodeStreams (config) {
 				// Create list of operations {function name, parameter} defining the final signing transformation
 				var transformPlan = [];
 				for (var i = 0; i < tFuncCalls.length; i++) {
-					var callData = tFuncCalls[i].match(/\w+\.(\w+)\(\w,(\d+)\)/);
+					var callData = tFuncCalls[i].match(/\w+(?:\.|\[\")(\w+)(?:\"\])?\(\w,(\d+)\)/);
 					transformPlan.push({ func : transformMap[callData[1]], value : callData[2] });
 				}
 				// Cache and return transformPlan
@@ -3550,7 +3550,7 @@ function ui_setupPlaylist () {
 	ui_plScrollDirty = true;
 	I("plTitle").innerText = "";
 	I("plDetail").innerText = "";
-	sec_playlist.style.display = "block";
+	sec_playlist.style.display = "";
 	setDisplay("plLoadingIndicator", "initial");
 	ui_addLoadingIndicator(ht_playlistVideos, true);
 	ui_setPlaylistSaved(true);
@@ -3574,7 +3574,7 @@ function ui_addToPlaylist (startIndex) {
 		ht_playlistVideos.appendChild (ht_getVideoPlaceholder(video.videoID, video.title, video.uploader.name));
 		if (video.videoID == yt_videoID) focusIndex = i;
 	}
-	sec_playlist.style.display = "block";
+	sec_playlist.style.display = "";
 	if (focusIndex != undefined) ui_setPlaylistPosition (focusIndex);
 	ht_playlistVideos.onscroll = function () {
 		ui_plScrollPos = ht_playlistVideos.scrollTop;
