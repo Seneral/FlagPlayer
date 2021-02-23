@@ -34,7 +34,7 @@
       "src": "maskable-192.png",
       "sizes": "192x192",
       "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "maskable"
     }
   ],
   "theme_color": "rgb(40,40,40)",
