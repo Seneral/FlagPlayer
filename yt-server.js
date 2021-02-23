@@ -1,3 +1,4 @@
+
 // Listen on a specific host via the HOST environment variable
 var host = process.env.HOST || 'localhost';
 // Listen on a specific port via the PORT environment variable
@@ -6,7 +7,7 @@ var port = process.env.PORT || 26060;
 if (process.env.IS_PUBLIC)
 { // Set on official heroku host
     originWhitelist = [ 'https://flagplayer.seneral.dev', 'https://www.seneral.dev' ];
-    checkRateLimit = require('./lib/rate-limit')('5000 5');
+    checkRateLimit = undefined; //require('./lib/rate-limit')('5000 5');
 }
 else
 { // Default when hosting locally
