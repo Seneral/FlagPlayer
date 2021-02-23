@@ -189,7 +189,7 @@ a, a:visited, a:hover, a:active {
 /* Modify playlist behaviour on mobile to occupy fullscreen */
 /* Not critical if :not not supported, no mobile-first here */
 .mobile .section.playlist.collapsable:not([collapsed]) {
-	display: flex !important;
+	display: flex;
 	flex-direction: column;
 	z-index: 10;
 	position: fixed;
@@ -629,6 +629,7 @@ a, a:visited, a:hover, a:active {
 /* --------------------------- */
 
 .section.playlist {
+	display: block;
 	background-color: var(--bg-sec-color);
 	border: 1px solid var(--bg-sec-acc-color);
 	overflow: hidden;
