@@ -2105,7 +2105,8 @@ function yt_extractChannelUploads(initialData) {
 	// Postprocess tabs and start loading certain tab types
 	uploads.loadingTabs = [];
 	uploads.tabs.forEach (function (tab) {
-		if (tab.continuation) { // Already have initial videos and continuation
+		if (tab.continuation || tab.loadReady) {
+			// Already have initial videos and continuation
 			tab.loadReady = true;
 		}
 		else if (tab.browseContent) { // Setup browse loader
@@ -2119,7 +2120,7 @@ function yt_extractChannelUploads(initialData) {
 			}));
 		}
 		else if (tab.listContent) { // Setup list loader
-			uploads.loadingTabs.push (yt_browse ("/playlist?list=" + listID)
+			uploads.loadingTabs.push (yt_browse ("/playlist?list=" + tab.listContent.listID)
 			.then (function (page) {
 				var tabs = page.initialData.contents.twoColumnBrowseResultsRenderer? 
 					page.initialData.contents.twoColumnBrowseResultsRenderer.tabs : 
@@ -2178,6 +2179,7 @@ function yt_extractChannelPageTabs (initialData) {
 			tab.title = "Uploads";
 			tab.continuation = yt_parseContinuations(c.itemSectionRenderer.continuations) || yt_parseContinuationItem(c.itemSectionRenderer.contents);
 			tab.videos = yt_parseChannelVideos(c.itemSectionRenderer.contents);
+			if (!tab.continuation) tab.loadReady = true;
 		}
 		else if (c.shelfRenderer) { // Nasty shelf setup - handle multiple tabs
 			var s = c.shelfRenderer;
@@ -2203,6 +2205,7 @@ function yt_extractChannelPageTabs (initialData) {
 			tab.title = "Uploads";
 			tab.continuation = yt_parseContinuations(c.gridRenderer.continuations) || yt_parseContinuationItem(c.gridRenderer.items);
 			tab.videos = yt_parseChannelVideos(c.gridRenderer.items);
+			if (!tab.continuation) tab.loadReady = true;
 		}
 		if (tab.title.toLowerCase().includes("more")) tab.title = "More"; // More from this artist
 		if (tab.title.toLowerCase().includes("streams")) tab.title = "Streams"; // Past live streams
