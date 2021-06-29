@@ -969,6 +969,7 @@ function ct_mediaReady () {
 function ct_mediaError (error) {
 	clearTimeout(md_timerCheckBuffering);
 	if (error instanceof PlaybackError && error.tag && error.tag.src.startsWith(VIRT_CACHE)) {
+		/*
 		console.error("Cached media file erroneous! Removing from cache. ", error);
 		md_resetStreams();
 		db_deleteCachedStream(yt_videoID).then (function () {
@@ -977,7 +978,10 @@ function ct_mediaError (error) {
 				ui_updateStreamState();
 			} else ct_startAutoplay(8);
 		});
-		ui_setNotification("vd-" + yt_videoID, 'Cache of ' + yt_videoID + ' is invalid, removed entry!', 5000);
+		ui_setNotification("vd-" + yt_videoID, 'Cache of ' + yt_videoID + ' is invalid, removed entry!', 5000);*/
+		console.error("Cached media file erroneous! Ignoring. ", error);
+		md_resetStreams();
+		ui_setNotification("vd-" + yt_videoID, 'Cache of "' + (yt_video && yt_video.meta? yt_video.meta.title : "") + '"' + yt_videoID + ' seems to be invalid!', 5000);
 		return;
 	} else if (error instanceof PlaybackError && error.code == 4) {
 		console.error("Can't play selected stream!");
@@ -1632,9 +1636,11 @@ function yt_browse (subPath) {
 				page.secrets.pageCL = page.configParams.PAGE_CL;
 				page.secrets.pageLabel = page.configParams.PAGE_BUILD_LABEL;
 				page.secrets.variantsChecksum = page.configParams.VARIANTS_CHECKSUM;
+				page.secrets.datasyncID = page.configParams.WEB_PLAYER_CONTEXT_CONFIGS.WEB_PLAYER_CONTEXT_CONFIG_ID_KEVLAR_WATCH.datasyncId.slice(0,-2);
 			}
 			
 			page.cookies = {};
+			page.cookies["VISITOR_INFO1_LIVE"] = page.secrets.datasyncID; // Mostly needed for comments
 			if (ct_isAdvancedCorsHost)
 				yt_extractCookies(page, response.headers.get("x-set-cookies"));
 			
@@ -1764,7 +1770,7 @@ function yt_parseTime (timeText) {
 function yt_parseNum (numText) {
 	if (numText == undefined) return 0;
 	if (Number.isInteger (numText)) return numText;
-	numMatch = numText.match(/[^0-9]*([0-9,.]+)\s?([KMB]?).*/); // (5.2)(K), (5263)(), (5,263)() etc.
+	numMatch = numText.match(/[^0-9]*([0-9,.]+)\s?([KMBkmb]?).*/); // (5.2)(K), (5263)(), (5,263)() etc.
 	if (!numMatch) return 0;
 	var num = parseInt(numMatch[1].replace(/[.,]/g,''));
 	if (isNaN(num)) return 0;
@@ -1772,9 +1778,9 @@ function yt_parseNum (numText) {
 		var split = numMatch[1].match(/([0-9]+)(?:[.,]([0-9]+))?/);
 		if (split[2])
 			num = parseInt(split[1].replace(/[.,]/g,'')) + parseFloat("0." + split[2]);
-		if (numMatch[2] == "K") return num * 1000;
-		if (numMatch[2] == "M") return num * 1000000;
-		if (numMatch[2] == "B") return num * 1000000000;
+		if (numMatch[2].toUpperCase() == "K") return num * 1000;
+		if (numMatch[2].toUpperCase() == "M") return num * 1000000;
+		if (numMatch[2].toUpperCase() == "B") return num * 1000000000;
 	}
 	return num;
 }
@@ -2460,22 +2466,25 @@ function yt_extractVideoMetadata(page, video) {
 function yt_extractRelatedVideoData(initialData) {
 	var related = { videos: [] };
 	
-	// Extract related videos
-	var results, extData;
-	/* -- Desktop Website -- */
-	if (initialData.contents.twoColumnWatchNextResults) {
-		var contents = initialData.contents.twoColumnWatchNextResults.secondaryResults.secondaryResults;
-		results = contents.results;
-	}
-	/* -- Mobile Website -- */
-	else if (initialData.contents.singleColumnWatchNextResults) {
-		var contents = initialData.contents.singleColumnWatchNextResults.results.results;
-		results = contents.contents.find(c => c.itemSectionRenderer && c.itemSectionRenderer.sectionIdentifier == "related-items").itemSectionRenderer.contents;
-	}
-	// Extract continuation
-	related.continuation = yt_parseContinuationItem(results);
-	// Extract videos
-	related.videos = yt_parseRelatedVideos(results);
+	try { // Extract related video data
+		// Extract related videos
+		var results, extData;
+		/* -- Desktop Website -- */
+		if (initialData.contents.twoColumnWatchNextResults) {
+			var contents = initialData.contents.twoColumnWatchNextResults.secondaryResults.secondaryResults;
+			results = contents.results;
+		}
+		/* -- Mobile Website -- */
+		else if (initialData.contents.singleColumnWatchNextResults) {
+			var contents = initialData.contents.singleColumnWatchNextResults.results.results;
+			results = contents.contents.find(c => c.itemSectionRenderer && c.itemSectionRenderer.sectionIdentifier == "related-items").itemSectionRenderer.contents;
+		}
+		if (!results) return related; // TODO: Happens on restricted videos, although browser still loads related videos
+		// Extract continuation
+		related.continuation = yt_parseContinuationItem(results);
+		// Extract videos
+		related.videos = yt_parseRelatedVideos(results);
+	} catch (e) { ct_mediaError(new ParseError(113, "Failed to read secondary video metadata: '" + e.message + "'!", true)); }
 
 	return related;
 }
@@ -2592,7 +2601,7 @@ function yt_loadMoreComments (commentData) {
 	var con = commentData.continuation;
 	var requestURL = (yt_page.isDesktop? HOST_YT + "/comment_service_ajax?" : HOST_YT_MOBILE + "/watch_comment?") + 
 		(isReplyRequest? "action_get_comment_replies" : "action_get_comments") + "=1&pbj=1" + 
-		"&ctoken=" + con.conToken + (con.conToken.length < 3000 && yt_page.isDesktop? "&continuation=" + con.conToken : "") +  "&itct=" + con.itctToken; 
+		"&ctoken=" + con.conToken + (con.conToken.length < 3000 && yt_page.isDesktop? "&continuation=" + con.conToken : "") +  "&type=next&itct=" + con.itctToken; 
 	return AJAX_REQUEST(requestURL, "POST", true)
 	.then(function (data) {
 		// Parsing
@@ -2635,10 +2644,19 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 					thread = c.commentThreadRenderer;
 					comm = thread.comment.commentRenderer;
 				} else comm = c.commentRenderer;
+
+				try { // Only exact measurement on desktop
+					var likeCount = yt_parseNum(comm.actionButtons.commentActionButtonsRenderer.likeButton.toggleButtonRenderer.accessibilityData.accessibilityData.label);
+				} catch(e) {}
+				if (!likeCount) {
+					try { // Simplified only (e.g. 2k)
+						var likeCount = yt_parseNum(yt_parseLabel(comm.voteCount));
+					} catch(e) {}
+				}
 				var comment = {
 					id: comm.commentId,
 					text: comm.contentText.runs? yt_parseFormattedRuns(comm.contentText.runs) : comm.contentText.simpleText,
-					likes: comm.likeCount,
+					likes: likeCount? likeCount : comm.likeCount,
 					publishedTimeAgoText: yt_parseLabel(comm.publishedTimeText),
 				};
 				comment.author = { // If no authorText, YT failed to get author internally (+ default thumbnail) - looking comment up by ID retrieves author correctly
@@ -4485,7 +4503,11 @@ function onMediaAbort () {
 	ct_mediaError(new PlaybackError(5, this.tagName + " aborted!", true, this));
 }
 function onMediaError (event) {
-	if (event.target.error.message != "MEDIA_ELEMENT_ERROR: Empty src attribute") {
+	if (event.target.error.code == 1) { // MEDIA_ERR_ABORTED
+		console.error("User aborted playback! " + event.target.error.message);
+		return;
+	}
+	if (event.target.error.message != "MEDIA_ELEMENT_ERROR: Empty src attribute" && !event.target.error.message.includes("MediaLoadInvalidURI")) {
 		ct_mediaError(new PlaybackError(event.target.error.code, event.target.error.message, true, event.target));
 	}
 }
@@ -4616,12 +4638,12 @@ function md_updateStreams ()  {
 }
 function md_resetStreams () {
 	videoMedia.pause();
-	//videoMedia.removeAttribute("src");
 	videoMedia.src = "";
+	videoMedia.removeAttribute("src");
 	videoMedia.load();
 	audioMedia.pause();
-	//audioMedia.removeAttribute("src");
 	audioMedia.src = "";
+	audioMedia.removeAttribute("src");
 	audioMedia.load();
 }
 
@@ -4796,7 +4818,7 @@ function md_forceStartMedia() {
 			md_paused = true;
 			md_pause();
 			if (attemptError.name == "NotAllowedError") {
-				console.warn("--- Automatic playback rejected!");
+				console.info("--- Automatic playback rejected!");
 				attemptAborted = true;
 				ct_mediaReady();
 			} else if (!attemptError instanceof DOMException) {
@@ -4807,7 +4829,7 @@ function md_forceStartMedia() {
 				setTimeout(md_checkStartMedia, 500);
 			}
 		} else {
-			console.log("--- MD: Started media playback!");
+			console.info("--- MD: Started media playback!");
 			md_assureSync();
 			ct_mediaReady();
 		}
@@ -4818,7 +4840,7 @@ function md_forceStartMedia() {
 			if (waitForOther) waitForOther = false;
 			else attemptFinally();
 		}).catch(error => {
-			console.warn("--- Failed to start " + media.tagName + " stream!");
+			console.info("--- Failed to start " + media.tagName + " stream!");
 			attemptError = error;
 			if (waitForOther && attemptError.name != "NotAllowedError") waitForOther = false;
 			else attemptFinally();
@@ -5013,7 +5035,8 @@ function ht_fillVideoPlaceholder (element, index, id, prim, sec, length) {
 }
 function ht_clearVideoPlaceholder (element, prim, sec) {
 	element.removeAttribute("videoID");
-	//element.innerText = prim + " " + sec;
+	element.innerText = "";
+//	element.innerText = prim + " " + sec;
 	return element;
 }
 function ht_appendVideoElement (container, index, id, length, prim, sec, tert, contextData) {

@@ -51,12 +51,12 @@ Useful for development, but all ServiceWorker features (audio caching, etc) are 
 #### Local CORS Server:  
 
 1. Download the project (master)
-2. Install [node.js](https://nodejs.org)
+2. Install [nodejs](https://nodejs.org)
 3. On Windows: Execute /server/CorsServer.bat
 4. On Linux: Execute /server/CorsServer.sh
-5. Note your local server adress as displayed in the console, usually http://localhost:26060
+5. Note your local server address as displayed in the console, usually http://localhost:26060
 6. Open the settings in FlagPlayer (gear top right)
-7. Enter local server adress into the Cors Server field
+7. Enter local server address into the Cors Server field
 
 Note: You need to start the local CORS server every time OR set it up as a service  
 You can also copy the .bat/.sh and put it on your desktop - just edit it to point to the yt-server.js file  
@@ -64,10 +64,10 @@ You can also copy the .bat/.sh and put it on your desktop - just edit it to poin
 ## Implementation
 
 #### Why a separate CORS server?	
-Direct request from one website to another website are usually blocked by the browser itself according to the Cross-Origin Resource Sharing (CORS) policy to prevent Cross-Site Request Forgery (XSRF). For any website scraping other website's content that means a reverse-proxy needs to be set up so that the CORS policy doesn't block the request. Simply rerouting the request to a local server which does not oblique by the same rules as the browser circumvents this.
+Direct request from one website to another website are usually blocked by the browser itself according to the Cross-Origin Resource Sharing (CORS) policy to prevent Cross-Site Request Forgery (XSRF). For any website scraping other website's content that means a reverse-proxy needs to be set up so that the CORS policy doesn't block the request. Simply rerouting the request to a local server which does not oblige by the same rules as the browser circumvents this.
 
 #### How does media playback work?
-YouTube uses something calles Media Source Extension (MSE) to exactly control the behaviour of buffering (loading) - since that means all request are script-controlled, all media fetch requests would now fall under the CORS policy and would have to be proxied. Since that would add immense load on public servers, I've chosen to make a hacky replacement to support DASH streams (where audio and video is separated), which works for most videos up to 2k. Additionally, the legacy streams (audio and video combined, only up to 720p) are supported as well. <br>
+YouTube uses a browser feature called Media Source Extension (MSE) to exactly control the behaviour of buffering (loading) and the merging of two separate video and audio streams - since that means all request are script-controlled, all media fetch requests would now fall under the CORS policy and would have to be proxied. Since that would add immense load on public servers, I've chosen to make a hacky replacement to support DASH streams (where audio and video is separated), which works for most videos up to 2k. Additionally, the legacy streams (audio and video combined, only up to 720p) are supported as well. <br>
 This does however mean that buffering, etc. is still handled by the browser, and it subject to it's whims and bugs.   Sometimes, a promise to start a stream will never resolve (Chrome), and the stream has to be restarted, resulting in audio glitches. Sometimes, the browser might arbitrarily decide to lower the buffering size, effectively preventing preload of anything more than 2s of video - especially a problem on low-bandwidth networks.
 
 ## Motivation
