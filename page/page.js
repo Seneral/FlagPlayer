@@ -2548,9 +2548,17 @@ function yt_extractVideoCommentData (initialData) {
 				comments.continuation = {
 					conToken: commentData.continuations[0].nextContinuationData.continuation,
 					itctToken: commentData.continuations[0].nextContinuationData.clickTrackingParams
-				}
+				};
 			} else {
-				comments.deactivated = true;
+				var con = commentData.contents.filter(c => c.continuationItemRenderer);
+				if (con.length > 0) {
+					comments.continuation = {
+						conToken: con[0].continuationItemRenderer.continuationEndpoint.continuationCommand.token,
+						itctToken: con[0].continuationItemRenderer.continuationEndpoint.clickTrackingParams
+					};
+				} else {
+					comments.deactivated = true;
+				}
 			}
 			if (commentData.header) { // Mobile only
 				comments.count = yt_parseNum(commentData.header.commentSectionHeaderRenderer.countText.runs[1].text);
@@ -2598,22 +2606,15 @@ function yt_loadMoreComments (commentData) {
 	if (!commentData.continuation)
 		return Promise.resolve(false);
 	var isReplyRequest = commentData.replies != undefined;
-	var con = commentData.continuation;
-	var requestURL = (yt_page.isDesktop? HOST_YT + "/comment_service_ajax?" : HOST_YT_MOBILE + "/watch_comment?") + 
-		(isReplyRequest? "action_get_comment_replies" : "action_get_comments") + "=1&pbj=1" + 
-		"&ctoken=" + con.conToken + (con.conToken.length < 3000 && yt_page.isDesktop? "&continuation=" + con.conToken : "") +  "&type=next&itct=" + con.itctToken; 
-	return AJAX_REQUEST(requestURL, "POST", true)
+	return PAGED_REQUEST(commentData.continuation, "next")
 	.then(function (data) {
-		// Parsing
-		try { yt_video.comments.lastPage = JSON.parse(data); 
-		} catch (e) { ct_mediaError(new ParseError(131, "Failed to parse received comment data: '" + e.message + "'!", true)); return; }
-		if (isReplyRequest || !yt_page.isDesktop) yt_video.comments.lastPage = yt_video.comments.lastPage[1];
-		yt_updateNavigation(yt_video.comments.lastPage);
+		yt_video.comments.lastPage = data;
+		//if (isReplyRequest || !yt_page.isDesktop) yt_video.comments.lastPage = yt_video.comments.lastPage[1];
 
 		// Extract comments
 		var comments = commentData.comments || commentData.replies;
 		var lastCommentCount = comments.length;
-		yt_extractVideoCommentObject(commentData, comments, yt_video.comments.lastPage.response);
+		yt_extractVideoCommentObject(commentData, comments, data);
 		ui_addComments(commentData.container, comments, lastCommentCount, commentData.continuation == undefined);
 
 		// Finish
@@ -2623,27 +2624,36 @@ function yt_loadMoreComments (commentData) {
 	});
 }
 function yt_extractVideoCommentObject (commentData, comments, response) {
-	var contents = response.continuationContents.commentRepliesContinuation || response.continuationContents.itemSectionContinuation || response.continuationContents.commentSectionContinuation;
+	var header = response.onResponseReceivedEndpoints.filter(c => c.reloadContinuationItemsCommand && c.reloadContinuationItemsCommand.slot == "RELOAD_CONTINUATION_SLOT_HEADER");
+	if (header.length > 0) header = header[0].reloadContinuationItemsCommand.continuationItems;
+	else header = undefined;
+	var contents = response.onResponseReceivedEndpoints.filter(c => c.reloadContinuationItemsCommand && c.reloadContinuationItemsCommand.slot == "RELOAD_CONTINUATION_SLOT_BODY");
+	if (contents.length > 0) contents = contents[0].reloadContinuationItemsCommand.continuationItems;
+	else {
+		contents = response.onResponseReceivedEndpoints.filter(c => c.appendContinuationItemsAction);
+		if (contents.length > 0) contents = contents[0].appendContinuationItemsAction.continuationItems;
+	}
 	
-	if (contents.header) {
+	if (header && header.length > 0) {
 		try { // Extract comment header
-			var header = contents.header.commentsHeaderRenderer;
-			commentData.count = header.commentsCount? yt_parseNum(header.commentsCount.simpleText) : (header.countText? yt_parseNum(header.countText.runs[0].text) : 0);
+			header = header[0].commentsHeaderRenderer;
+			commentData.count = header.countText? yt_parseNum(yt_parseLabel(header.countText)) : (header.commentsCount? yt_parseNum(yt_parseLabel(header.commentsCount)) : 0);
 			var sortList = header.sortMenu.sortFilterSubMenuRenderer.subMenuItems;
-			commentData.conTokenTop = sortList[0].continuation.reloadContinuationData.continuation;
-			commentData.conTokenNew = sortList[1].continuation.reloadContinuationData.continuation;
+			commentData.conTokenTop = sortList[0].serviceEndpoint.continuationCommand.token;
+			commentData.conTokenNew = sortList[1].serviceEndpoint.continuationCommand.token;
 			commentData.sorted = sortList[0].selected? "TOP" : "NEW";
 		} catch (e) { ct_mediaError(new ParseError(132, "Failed to extract comment header: '" + e.message + "'!", true)); }
 	} // Only in first main request, never reply requests
 
-	if (contents.contents || contents.items) {
+	if (contents.length > 0) {
 		try { // Extract comments
-			(contents.contents || contents.items).forEach(function (c) {
+			contents.forEach(function (c) {
 				var thread, comm;
 				if (c.commentThreadRenderer) {
 					thread = c.commentThreadRenderer;
 					comm = thread.comment.commentRenderer;
 				} else comm = c.commentRenderer;
+				if (!comm) return; // ContinuationItemRenderer
 
 				try { // Only exact measurement on desktop
 					var likeCount = yt_parseNum(comm.actionButtons.commentActionButtonsRenderer.likeButton.toggleButtonRenderer.accessibilityData.accessibilityData.label);
@@ -2656,7 +2666,7 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 				var comment = {
 					id: comm.commentId,
 					text: comm.contentText.runs? yt_parseFormattedRuns(comm.contentText.runs) : comm.contentText.simpleText,
-					likes: likeCount? likeCount : comm.likeCount,
+					likes: likeCount,
 					publishedTimeAgoText: yt_parseLabel(comm.publishedTimeText),
 				};
 				comment.author = { // If no authorText, YT failed to get author internally (+ default thumbnail) - looking comment up by ID retrieves author correctly
@@ -2670,27 +2680,44 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 				if (thread) { // Main, first stage comment
 					comment.replyData = { 
 						count: comm.replyCount? comm.replyCount : 0,
-						continuation: {
-							conToken: thread.replies? thread.replies.commentRepliesRenderer.continuations[0].nextContinuationData.continuation : undefined
-						},
+						continuation: undefined,
 						replies: comm.replyCount? [] : undefined,
 					};
+					if (thread.replies && thread.replies.commentRepliesRenderer) {
+						var cont = thread.replies.commentRepliesRenderer.contents.filter(c => c.continuationItemRenderer);
+						if (cont.length > 0) {
+							comment.replyData.continuation = {
+								conToken: cont[0].continuationItemRenderer.continuationEndpoint.continuationCommand.token,
+								itctToken: cont[0].continuationItemRenderer.continuationEndpoint.clickTrackingParams
+							};
+						}
+					}
 				}
 				comments.push(comment);
 			});
 		} catch (e) { ct_mediaError(new ParseError(133, "Failed to extract comments: '" + e.message + "'!", true)); }
 	}
 
+	commentData.continuation = undefined;
 	try {
-		if (contents.continuations) {
-			commentData.continuation = {
-				conToken: contents.continuations[0].nextContinuationData.continuation,
-				itctToken: contents.continuations[0].nextContinuationData.clickTrackingParams
-			};
-		} else {
-			commentData.continuation = undefined;
+		if (contents) {
+			var cont = contents.filter(c => c.continuationItemRenderer);
+			if (cont.length > 0) {
+				cont = cont[0].continuationItemRenderer;
+				if (cont.continuationEndpoint) {
+					commentData.continuation = {
+						conToken: cont.continuationEndpoint.continuationCommand.token,
+						itctToken: cont.continuationEndpoint.clickTrackingParams
+					};
+				} else if (cont.button) {
+					commentData.continuation = {
+						conToken: cont.button.buttonRenderer.command.continuationCommand.token,
+						itctToken: cont.button.buttonRenderer.command.clickTrackingParams
+					};
+				}
+				commentData.itctToken = commentData.continuation.itctToken;
+			}
 		}
-		commentData.itctToken = contents.trackingParams;
 	} catch (e) { ct_mediaError(new ParseError(134, "Failed to extract comment continuations: '" + e.message + "'!", true)); }
 }
 
@@ -3978,7 +4005,7 @@ function ui_hideControlBar () {
 	ct_temp.showControlBar = false;
 	I("volumeSlider").parentElement.removeAttribute("interacting");
 }
-function ui_updateControlBar (mouse) { // MouseEvent + 100ms Interval
+function ui_updateControlBar (mouse) { // MouseEvent + 500ms Interval
 	if (ct_temp.options) { // Force show when options are open
 		ui_showControlBar();
 		return;
@@ -3991,7 +4018,7 @@ function ui_updateControlBar (mouse) { // MouseEvent + 100ms Interval
 				}
 			} else ui_hideControlBar();
 		} else { // Interval - Hide when mouse unmoved
-			if (ui_cntControlBar > 10*3) ui_hideControlBar();
+			if (ui_cntControlBar >= 6) ui_hideControlBar();
 			else ui_cntControlBar++;
 		}
 	} else ui_showControlBar(); // Force show on pause / buffering / seeking
@@ -4047,7 +4074,7 @@ function ui_setupEventHandlers () {
 	ui_setupDropdowns();
 
 	// Control Bar hiding (+ in onmouse events)
-	setInterval(ui_updateControlBar, 100);
+	setInterval(ui_updateControlBar, 500);
 	controlBar.addEventListener ("focus", ui_showControlBar, true);
 	
 	/* Button Handlers */
@@ -4276,6 +4303,8 @@ function onSelectContextAction (selectedValue, dropdownElement, selectedElement)
 function onLoadReplies (container, commentID) {
 	var comment = yt_video.comments.comments.find(c => c.id == commentID);
 	yt_loadCommentReplies(comment, container);
+	var loader = Array.from(container.children).find(c => c.className.includes("contentLoader"));
+	loader.style.display = "none";
 }
 function onToggleButton (button, callback) {
 	button.onclick = function () {
