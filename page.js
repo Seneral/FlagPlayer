@@ -1636,7 +1636,9 @@ function yt_browse (subPath) {
 				page.secrets.pageCL = page.configParams.PAGE_CL;
 				page.secrets.pageLabel = page.configParams.PAGE_BUILD_LABEL;
 				page.secrets.variantsChecksum = page.configParams.VARIANTS_CHECKSUM;
-				page.secrets.datasyncID = page.configParams.WEB_PLAYER_CONTEXT_CONFIGS.WEB_PLAYER_CONTEXT_CONFIG_ID_KEVLAR_WATCH.datasyncId.slice(0,-2);
+				page.secrets.datasyncID = page.configParams.WEB_PLAYER_CONTEXT_CONFIGS.WEB_PLAYER_CONTEXT_CONFIG_ID_KEVLAR_WATCH?
+					page.configParams.WEB_PLAYER_CONTEXT_CONFIGS.WEB_PLAYER_CONTEXT_CONFIG_ID_KEVLAR_WATCH.datasyncId.slice(0,-2) : // Dektop
+					page.configParams.WEB_PLAYER_CONTEXT_CONFIGS.WEB_PLAYER_CONTEXT_CONFIG_ID_MWEB_WATCH.datasyncId.slice(0,-2); // Mobile
 			}
 			
 			page.cookies = {};
@@ -2605,11 +2607,9 @@ function yt_loadCommentReplies (comment, replyContainer) {
 function yt_loadMoreComments (commentData) {
 	if (!commentData.continuation)
 		return Promise.resolve(false);
-	var isReplyRequest = commentData.replies != undefined;
 	return PAGED_REQUEST(commentData.continuation, "next")
 	.then(function (data) {
 		yt_video.comments.lastPage = data;
-		//if (isReplyRequest || !yt_page.isDesktop) yt_video.comments.lastPage = yt_video.comments.lastPage[1];
 
 		// Extract comments
 		var comments = commentData.comments || commentData.replies;
