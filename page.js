@@ -2416,9 +2416,9 @@ function yt_extractVideoMetadata(page, video) {
 			var videoData = page.initialData.contents.singleColumnWatchNextResults.results.results.contents
 				.find(c => c.slimVideoMetadataSectionRenderer).slimVideoMetadataSectionRenderer;
 			var metaContainer = videoData.contents.find(c => c.slimVideoMetadataSectionRenderer).slimVideoMetadataSectionRenderer || videoData;
-			var mainContainer = videoData.contents.find(c => c.slimVideoInformationRenderer).slimVideoInformationRenderer;
+			var mainContainer = metaContainer.contents.find(c => c.slimVideoInformationRenderer).slimVideoInformationRenderer;
 			var actionContainer = metaContainer.contents.find(c => c.slimVideoActionBarRenderer).slimVideoActionBarRenderer;
-			uploaderContainer = videoData.contents.find(c => c.slimOwnerRenderer).slimOwnerRenderer;
+			uploaderContainer = metaContainer.contents.find(c => c.slimOwnerRenderer).slimOwnerRenderer;
 			// Can't easily get metadataContainer on mobile, only in html once loaded by click on header
 			// Upload Date
 			meta.uploadedDate = mainContainer.expandedSubtitle.runs[3];
