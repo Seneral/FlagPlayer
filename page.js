@@ -2414,18 +2414,20 @@ function yt_extractVideoMetadata(page, video) {
 		try {
 			// This is no joke
 			var videoData = page.initialData.contents.singleColumnWatchNextResults.results.results.contents
-				.find(c => c.itemSectionRenderer && c.itemSectionRenderer.sectionIdentifier == "slim-video-metadata")
-				.itemSectionRenderer.contents[0].slimVideoMetadataRenderer;
-			metadataContainer = videoData;
-			uploaderContainer = videoData.owner.slimOwnerRenderer;
+				.find(c => c.slimVideoMetadataSectionRenderer).slimVideoMetadataSectionRenderer;
+			var metaContainer = videoData.contents.find(c => c.slimVideoMetadataSectionRenderer).slimVideoMetadataSectionRenderer || videoData;
+			var mainContainer = videoData.contents.find(c => c.slimVideoInformationRenderer).slimVideoInformationRenderer;
+			var actionContainer = metaContainer.contents.find(c => c.slimVideoActionBarRenderer).slimVideoActionBarRenderer;
+			uploaderContainer = videoData.contents.find(c => c.slimOwnerRenderer).slimOwnerRenderer;
+			// Can't easily get metadataContainer on mobile, only in html once loaded by click on header
 			// Upload Date
-			meta.uploadedDate = yt_parseDateText (yt_parseLabel(videoData.dateText));
+			meta.uploadedDate = mainContainer.expandedSubtitle.runs[3];
 			// Views
-			meta.views = yt_parseNum(yt_parseLabel(videoData.expandedSubtitle));
+			meta.views = yt_parseNum(yt_parseLabel(mainContainer.expandedSubtitle));
 			// Ratings
 			if (meta.allowRatings) {
-				var likeButton = videoData.buttons.find(b => b.slimMetadataToggleButtonRenderer && b.slimMetadataToggleButtonRenderer.isLike).slimMetadataToggleButtonRenderer.button.toggleButtonRenderer;
-				var dislikeButton = videoData.buttons.find(b => b.slimMetadataToggleButtonRenderer && b.slimMetadataToggleButtonRenderer.isDislike).slimMetadataToggleButtonRenderer.button.toggleButtonRenderer;
+				var likeButton = actionContainer.buttons.find(b => b.slimMetadataToggleButtonRenderer && b.slimMetadataToggleButtonRenderer.isLike).slimMetadataToggleButtonRenderer.button.toggleButtonRenderer;
+				var dislikeButton = actionContainer.buttons.find(b => b.slimMetadataToggleButtonRenderer && b.slimMetadataToggleButtonRenderer.isDislike).slimMetadataToggleButtonRenderer.button.toggleButtonRenderer;
 				meta.likes = yt_parseNum(likeButton.defaultText.accessibility.accessibilityData.label);
 				meta.dislikes = yt_parseNum(dislikeButton.defaultText.accessibility.accessibilityData.label);
 			}
@@ -2445,17 +2447,19 @@ function yt_extractVideoMetadata(page, video) {
 	} catch (e) { ct_mediaError(new ParseError(112, "Failed to read video uploader metadata: '" + e.message + "'!", true)); }
 
 	try { // Extract secondary metadata
-		meta.metadata = metadataContainer.metadataRowContainer.metadataRowContainerRenderer.rows?
-			metadataContainer.metadataRowContainer.metadataRowContainerRenderer.rows.reduce((d, r) => {
-			if (r = r.metadataRowRenderer) 
-				d.push({ 
-					name: r.title.runs? r.title.runs.map(t => t.text).join(', ') : r.title.simpleText, 
-					data: r.contents[0].runs? r.contents[0].runs.map(t => t.text).join(', ') : r.contents[0].simpleText, 
-				});
-			return d;
-		}, []) : [];
-		var category = meta.metadata.find(d => d.name == "Category");
-		meta.category = category? category.data : "Unknown";
+		if (metadataContainer)
+			meta.metadata = metadataContainer.metadataRowContainer.metadataRowContainerRenderer.rows?
+				metadataContainer.metadataRowContainer.metadataRowContainerRenderer.rows.reduce((d, r) => {
+				if (r = r.metadataRowRenderer) 
+					d.push({ 
+						name: r.title.runs? r.title.runs.map(t => t.text).join(', ') : r.title.simpleText, 
+						data: r.contents[0].runs? r.contents[0].runs.map(t => t.text).join(', ') : r.contents[0].simpleText, 
+					});
+				return d;
+			}, []) : [];
+			var category = meta.metadata.find(d => d.name == "Category");
+			meta.category = category? category.data : "Unknown";
+		}
 	} catch (e) { ct_mediaError(new ParseError(113, "Failed to read secondary video metadata: '" + e.message + "'!", true)); }
 
 	return meta;
@@ -3318,7 +3322,7 @@ function ui_setVideoMetadata() {
 		link.href = ct_getNavLink(uploaderNav);
 	});
 	I("vdUploaderName").innerText = yt_video.meta.uploader.name;
-	I("vdUploadDate").innerText = yt_video.meta.uploadedDate? "Uploaded on " + ui_formatDate(yt_video.meta.uploadedDate) : "Live";
+	I("vdUploadDate").innerText = yt_video.meta.uploadedDate? (typeof yt_video.meta.uploadedDate === "string"? "Uploaded " + yt_video.meta.uploadedDate : "Uploaded on " + ui_formatDate(yt_video.meta.uploadedDate)) : "";
 	if (yt_video.loaded) {
 		var uploaderImg = I("vdUploaderImg");
 		uploaderImg.src = yt_video.meta.uploader.profileImg;
