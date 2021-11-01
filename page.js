@@ -2447,7 +2447,7 @@ function yt_extractVideoMetadata(page, video) {
 	} catch (e) { ct_mediaError(new ParseError(112, "Failed to read video uploader metadata: '" + e.message + "'!", true)); }
 
 	try { // Extract secondary metadata
-		if (metadataContainer)
+		if (metadataContainer) {
 			meta.metadata = metadataContainer.metadataRowContainer.metadataRowContainerRenderer.rows?
 				metadataContainer.metadataRowContainer.metadataRowContainerRenderer.rows.reduce((d, r) => {
 				if (r = r.metadataRowRenderer) 
