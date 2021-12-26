@@ -735,12 +735,10 @@ function ct_navSearch(searchTerms, inNewState) {
 	var chMatch = searchTerms.match(/(UC[a-zA-Z0-9_-]{22})/);
 	var cMatch = searchTerms.match(/c\/([a-zA-Z0-9_-]+)/);
 	var uMatch = searchTerms.match(/user\/([a-zA-Z0-9_-]+)/);
-	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/) || searchTerms.match(/youtu.be\/([a-zA-Z0-9_-]{11})/) || searchTerms.match(/^([a-zA-Z0-9_-]{11})$/);
 	if (plMatch) ct_loadPlaylist(plMatch[1]);
-	if (!plMatch || vdMatch) {
+	if (!plMatch) {
 		ct_beforeNav();
-		if (vdMatch) yt_videoID = vdMatch[1];
-		else if (chMatch) yt_channelID = { channel: chMatch[1] };
+		if (chMatch) yt_channelID = { channel: chMatch[1] };
 		else if (uMatch) yt_channelID = { user: uMatch[1] };
 		else if (cMatch) yt_channelID = { channelName: cMatch[1] };
 		else yt_searchTerms = searchTerms;
