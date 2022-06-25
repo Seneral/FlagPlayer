@@ -735,7 +735,7 @@ function ct_navSearch(searchTerms, inNewState) {
 	var chMatch = searchTerms.match(/(UC[a-zA-Z0-9_-]{22})/);
 	var cMatch = searchTerms.match(/c\/([a-zA-Z0-9_-]+)/);
 	var uMatch = searchTerms.match(/user\/([a-zA-Z0-9_-]+)/);
-	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/) || searchTerms.match(/youtu.be\/([a-zA-Z0-9_-]{11})/) || searchTerms.match(/^([a-zA-Z0-9_-]{11})$/);
+	var vdMatch = searchTerms.match(/v=([a-zA-Z0-9_-]{11})/) || searchTerms.match(/youtu.be\/([a-zA-Z0-9_-]{11})/);
 	if (plMatch) ct_loadPlaylist(plMatch[1]);
 	if (!plMatch || vdMatch) {
 		ct_beforeNav();
