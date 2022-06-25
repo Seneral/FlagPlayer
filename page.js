@@ -800,6 +800,7 @@ function ct_loadChannel() {
 		else {
 			console.error("Error " + error.name + " while loading Channel Page: " + error.message);
 		}
+		ui_setChannelError(error);
 	});
 }
 function ct_resetChannel () {
@@ -1583,24 +1584,28 @@ function yt_browse (subPath) {
 			page.html = html;
 			page.isDesktop = true;
 			try { 
-				var initialDataRaw;
-				var match = page.html.match (/var\s*ytInitialData\s*=\s*({.*?});/);
-				if (!match)
-					match = page.html.match (/window\["ytInitialData"\]\s*=\s*({.*?});/);
-				if (!match) {
-					match = page.html.match (/var\s*ytInitialData\s*=\s*'(.*?)';/);
-					if (match)
-					{ // Do manual decodeURIComponent except that \x** is used instead of %** (although there are also those used within the text)
-						initialDataRaw = match[1].replace(/\\x[0-9A-Fa-f]{2}/g, (m) => {
-							return String.fromCharCode(parseInt(m.substring(2, 5), 16));
-						});
-						initialDataRaw = initialDataRaw.replace(/\\(.)/g, "$1");
-					}
-					else
-						match = page.html.match (/<div\s+id="initial-data">\s*<!--\s*({.*?})\s*-->\s*<\/div>/);
-					if (match) page.isDesktop = false;
+				var initialData = page.html.match (/var\s*ytInitialData\s*=\s*'(.*?)';/);
+				if (initialData) { // Mobile
+					// Do manual decodeURIComponent except that \x** is used instead of %** (although there are also those used within the text)
+					initialData[1] = initialData[1].replace(/\\x[0-9A-Fa-f]{2}/g, (m) => {
+						return String.fromCharCode(parseInt(m.substring(2, 5), 16));
+					});
+					initialData[1] = initialData[1].replace(/\\(.)/g, "$1");
+					//initialData[1] = decodeURIComponent(initialData[1]); // Seems to work on Chrome and Firefox by now (but not all Mobile browsers)
+					page.isDesktop = false;
 				}
-				page.initialData = JSON.parse(initialDataRaw? initialDataRaw : match[1]);
+				if (!initialData) { // Desktop
+					initialData = page.html.match (/var\s*ytInitialData\s*=\s*({.*?});/);
+					if (initialData) page.isDesktop = true;
+				}
+				// Try deprecated methods
+				if (!initialData) { // Old mobile?
+					initialData = page.html.match (/<div\s+id="initial-data">\s*<!--\s*({.*?})\s*-->\s*<\/div>/);
+				}
+				if (!initialData) { // Old desktop?
+					initialData = page.html.match (/window\["ytInitialData"\]\s*=\s*({.*?});/);
+				}
+				page.initialData = JSON.parse(initialData[1]);
 			} catch (e) { console.error(page.error = "Failed to get initial data!", e); }
 
 			try { page.configParams = JSON.parse(page.html.match (/ytcfg\.set\s*\(({.*?})\);/)[1]); 
@@ -1650,8 +1655,9 @@ function yt_browse (subPath) {
 			return page;
 		});
 	}).catch(function(error) {
-		if (error.code) throw new NetworkError(undefined, error.message, error.code);
-		else throw new NetworkError(undefined, "No network or CORS access denied!");
+		if (error instanceof NetworkError) return Promise.reject(error);
+		else if (error.code) return Promise.reject(error);
+		else return Promise.reject(new NetworkError(undefined, "No network or CORS access denied!"));
 	});
 }
 /* Loads the URL with Youtube Mechanics - response is only a data object without secrets. Browse needs to be called first on any YT page */
@@ -2007,6 +2013,17 @@ function yt_loadSearchPage(searchTerms, background) {
 		// Finish
 		console.log("YT Search:", searchResults);
 		return { searchResults: searchResults, page: page };
+	})
+	// Handle different errors while loading
+	.catch(function(error) {
+		if (!error) return; // Silent fail when request has gone stale (new page loaded before this finished)
+		if (error instanceof NetworkError) {
+			console.error("Network Error! Could not load Search Page!");
+		}
+		else {
+			console.error("Error " + error.name + " while loading Search Page: " + error.message);
+		}
+		ui_setSearchError(error);
 	});
 }
 function yt_parseSearchResults(itemList) {
@@ -2367,6 +2384,7 @@ function yt_extractVideoMetadata(page, video) {
 			channelID: videoDetail.channelId,
 		};
 		meta.allowRatings = videoDetail.allowRatings;
+		meta.views = videoDetail.views;
 		
 	} catch (e) { ct_mediaError(new ParseError(110, "Failed to read primary video metadata: '" + e.message + "'!", true)); }
 
@@ -2390,12 +2408,13 @@ function yt_extractVideoMetadata(page, video) {
 			if (primary.dateText) meta.uploadedDate = yt_parseDateText (primary.dateText.simpleText);
 			else if (secondary.dateText) meta.uploadedDate = yt_parseDateText (secondary.dateText.simpleText);
 			// Views
-			meta.views = yt_parseNum(primary.viewCount.videoViewCountRenderer.viewCount.simpleText);
+			meta.views = meta.views || yt_parseNum(primary.viewCount.videoViewCountRenderer.viewCount.simpleText);
 			// Ratings
 			if (meta.allowRatings) {
-				var sentiments = primary.sentimentBar.sentimentBarRenderer.tooltip.split(' / ');
-				meta.likes = yt_parseNum(sentiments[0]);
-				meta.dislikes = yt_parseNum(sentiments[1]);
+				sentimentButtons = primary.videoActions.menuRenderer.topLevelButtons.filter(c => c.toggleButtonRenderer);
+				likeButton = sentimentButtons.find(c => c.toggleButtonRenderer.targetId == "watch-like").toggleButtonRenderer;
+				meta.likes = yt_parseNum(likeButton.defaultText.accessibility.accessibilityData.label);
+				meta.dislikes = undefined;
 			}
 			// Subscribers
 			if (secondary.owner.videoOwnerRenderer.subscriberCountText) {
@@ -2416,7 +2435,6 @@ function yt_extractVideoMetadata(page, video) {
 			var videoData = page.initialData.contents.singleColumnWatchNextResults.results.results.contents
 				.find(c => c.slimVideoMetadataSectionRenderer).slimVideoMetadataSectionRenderer;
 			var mainContainer = videoData.contents.find(c => c.slimVideoInformationRenderer).slimVideoInformationRenderer;
-			var actionContainer = videoData.contents.find(c => c.slimVideoActionBarRenderer).slimVideoActionBarRenderer;
 			uploaderContainer = videoData.contents.find(c => c.slimOwnerRenderer).slimOwnerRenderer;
 			// Can't easily get metadataContainer on mobile, only in html once loaded by click on header
 			// Upload Date
@@ -2425,10 +2443,10 @@ function yt_extractVideoMetadata(page, video) {
 			meta.views = yt_parseNum(yt_parseLabel(mainContainer.expandedSubtitle));
 			// Ratings
 			if (meta.allowRatings) {
-				var likeButton = actionContainer.buttons.find(b => b.slimMetadataToggleButtonRenderer && b.slimMetadataToggleButtonRenderer.isLike).slimMetadataToggleButtonRenderer.button.toggleButtonRenderer;
-				var dislikeButton = actionContainer.buttons.find(b => b.slimMetadataToggleButtonRenderer && b.slimMetadataToggleButtonRenderer.isDislike).slimMetadataToggleButtonRenderer.button.toggleButtonRenderer;
-				meta.likes = yt_parseNum(likeButton.defaultText.accessibility.accessibilityData.label);
-				meta.dislikes = yt_parseNum(dislikeButton.defaultText.accessibility.accessibilityData.label);
+				var actionContainer = videoData.contents.find(c => c.slimVideoActionBarRenderer).slimVideoActionBarRenderer;
+				var likeButton = actionContainer.buttons.find(b => b.slimMetadataToggleButtonRenderer && b.slimMetadataToggleButtonRenderer.isLike).slimMetadataToggleButtonRenderer.button.toggleButtonRenderer;	
+				meta.likes = yt_parseNum(likeButton.defaultText.accessibility.accessibilityData.label);;
+				meta.dislikes = undefined;
 			}
 			// Subscribers
 			meta.uploader.subscribers = yt_parseNum(yt_parseLabel(uploaderContainer.expandedSubtitle));
@@ -2502,29 +2520,32 @@ function yt_loadMoreRelatedVideos (related) {
 	}, "next")(related);
 }
 function yt_parseRelatedVideos (itemList) {
-	return itemList.filter(v => v.compactVideoRenderer && !v.compactVideoRenderer.badges)
-	.map(function (v) {
-		v = v.compactVideoRenderer;
-		var relVid = { 
-			title: yt_parseLabel(v.title),
-			videoID: v.videoId,
-			views: yt_parseNum(yt_parseLabel(v.viewCountText)),
-			length: yt_parseTime(yt_parseLabel(v.lengthText)),
-			thumbnailURL: yt_selectThumbnail(v.thumbnail.thumbnails),
-			itctToken: v.navigationEndpoint.clickTrackingParams,
-		};
-		var uLink = v.shortBylineText.runs[0].navigationEndpoint.browseEndpoint;
-		relVid.uploader = { 
-			name: yt_parseLabel(v.shortBylineText), 
-			channelID: uLink.browseId,
-			url: uLink.canonicalBaseUrl? uLink.canonicalBaseUrl : "/channel/" + uLink.browseId,
-			userID: uLink.canonicalBaseUrl && uLink.canonicalBaseUrl.startsWith ("/user/")? uLink.canonicalBaseUrl.substring(6) : undefined,
-			profileImg: yt_selectThumbnail(v.channelThumbnail.thumbnails),
-			badge: v.ownerBadges && v.ownerBadges.length > 0? v.ownerBadges[0].metadataBadgeRenderer.tooltip : undefined,
-			itctToken: v.shortBylineText.runs[0].navigationEndpoint.clickTrackingParams,
-		};
-		return relVid;
-	});
+	return itemList.filter(v => v.compactVideoRenderer || v.compactAutoplayRenderer || v.videoWithContextRenderer)
+		.map(v => v.compactAutoplayRenderer? v.compactAutoplayRenderer.contents[0].videoWithContextRenderer : (v.videoWithContextRenderer || v.compactVideoRenderer))
+		.filter(v => !v.badges)
+		.map(function (v) {
+			var relVid = { 
+				title: yt_parseLabel(v.title || v.headline),
+				videoID: v.videoId,
+				views: yt_parseNum(yt_parseLabel(v.viewCountText || v.shortViewCountText)),
+				length: yt_parseTime(yt_parseLabel(v.lengthText)),
+				thumbnailURL: yt_selectThumbnail(v.thumbnail.thumbnails),
+				itctToken: v.navigationEndpoint.clickTrackingParams,
+			};
+			var uLink = v.shortBylineText.runs[0].navigationEndpoint.browseEndpoint;
+			if (v.channelThumbnail.channelThumbnailWithLinkRenderer)
+				v.channelThumbnail = v.channelThumbnail.channelThumbnailWithLinkRenderer.thumbnail;
+			relVid.uploader = { 
+				name: yt_parseLabel(v.shortBylineText), 
+				channelID: uLink.browseId,
+				url: uLink.canonicalBaseUrl? uLink.canonicalBaseUrl : "/channel/" + uLink.browseId,
+				userID: uLink.canonicalBaseUrl && uLink.canonicalBaseUrl.startsWith ("/user/")? uLink.canonicalBaseUrl.substring(6) : undefined,
+				profileImg: yt_selectThumbnail(v.channelThumbnail.thumbnails),
+				badge: v.ownerBadges && v.ownerBadges.length > 0? v.ownerBadges[0].metadataBadgeRenderer.tooltip : undefined,
+				itctToken: v.shortBylineText.runs[0].navigationEndpoint.clickTrackingParams,
+			};
+			return relVid;
+		});
 }
 
 /* -------------------- */
@@ -2540,37 +2561,61 @@ function yt_extractVideoCommentData (initialData) {
 			var isr = initialData.contents.twoColumnWatchNextResults.results.results.contents.filter(c => c.itemSectionRenderer);
 			isr = isr.map(c => c.itemSectionRenderer);
 			if (isr.length > 1) isr = isr.filter(c => c.sectionIdentifier && c.sectionIdentifier.includes("comment"));
-			commentData = isr.length > 0? isr[0] : null;
-		}
-		else if (initialData.contents.singleColumnWatchNextResults) {
-			var csr = initialData.contents.singleColumnWatchNextResults.results.results.contents.filter(c => c.commentSectionRenderer);
-			csr = csr.map(c => c.commentSectionRenderer);
-			if (csr.length > 1) csr = csr.filter(c => c.sectionIdentifier && c.sectionIdentifier.includes("comment")); // TODO: Check if needed
-			commentData = csr.length > 0? csr[0] : null;
-		}
-		if (commentData) {
-			if (commentData.continuations) {
-				comments.continuation = {
-					conToken: commentData.continuations[0].nextContinuationData.continuation,
-					itctToken: commentData.continuations[0].nextContinuationData.clickTrackingParams
-				};
-			} else {
-				var con = commentData.contents.filter(c => c.continuationItemRenderer);
-				if (con.length > 0) {
+			var commentDataHeader = isr.find(c => c.sectionIdentifier == "comments-entry-point");
+			if (commentDataHeader)
+			{
+				commentDataHeader = commentDataHeader.contents.find(c => c.commentsEntryPointHeaderRenderer).commentsEntryPointHeaderRenderer;
+				comments.count = yt_parseNum(yt_parseLabel(commentDataHeader.commentCount));
+			}
+			var commentData = isr.find(c => c.sectionIdentifier == "comment-item-section");
+			if (commentData) {
+				commentData = commentData.contents.find(c => c.continuationItemRenderer).continuationItemRenderer;
+				if (commentData) {
 					comments.continuation = {
-						conToken: con[0].continuationItemRenderer.continuationEndpoint.continuationCommand.token,
-						itctToken: con[0].continuationItemRenderer.continuationEndpoint.clickTrackingParams
+						conToken: commentData.continuationEndpoint.continuationCommand.token,
+						itctToken: commentData.continuationEndpoint.clickTrackingParams
 					};
 				} else {
-					comments.deactivated = true;
+					comments.unavailable = true;
 				}
+			} else {
+				comments.unavailable = true;
 			}
-			if (commentData.header) { // Mobile only
-				comments.count = yt_parseNum(commentData.header.commentSectionHeaderRenderer.countText.runs[1].text);
-				comments.sorted = "TOP"; // No way to select sorting on mobile website (only on app)
+		}
+		else if (initialData.contents.singleColumnWatchNextResults) {
+			commentData = initialData.engagementPanels.find(p => p.engagementPanelSectionListRenderer && p.engagementPanelSectionListRenderer.panelIdentifier == "engagement-panel-comments-section");
+
+			if (commentData) {
+				commentData = commentData.engagementPanelSectionListRenderer;
+				if (commentData.continuations) {
+					comments.continuation = {
+						conToken: commentData.continuations[0].nextContinuationData.continuation,
+						itctToken: commentData.continuations[0].nextContinuationData.clickTrackingParams
+					};
+				} else {
+					try  {
+						var continuation = commentData.content.sectionListRenderer.contents[0].itemSectionRenderer.contents[0].continuationItemRenderer;
+						comments.continuation = {
+							conToken: continuation.continuationEndpoint.continuationCommand.token,
+							itctToken: continuation.continuationEndpoint.clickTrackingParams
+						};
+					} catch(e) {
+						comments.unavailable = true;
+					}
+				}
+				if (commentData.header) { // Mobile only
+					comments.count = yt_parseNum(yt_parseLabel(commentData.header.engagementPanelTitleHeaderRenderer.contextualInfo));
+					comments.sorted = "TOP"; // No way to select sorting on mobile website (only on app)
+				}
+			} else {
+				comments.unavailable = true;
 			}
-		}else {
-			comments.deactivated = true;
+
+			try { // Only to extract MORE accurate comment count
+				var extCommentData = initialData.contents.singleColumnWatchNextResults.results.results.contents.find(c => c.itemSectionRenderer).itemSectionRenderer;
+				extCommentData = extCommentData.contents.find(c => c.commentsEntryPointHeaderRenderer).commentsEntryPointHeaderRenderer;
+				comments.count = yt_parseNum(yt_parseLabel(extCommentData.headerText));
+			} catch(e) {}
 		}
 	} catch (e) { ct_mediaError(new ParseError(130, "Failed to extract video comment data: '" + e.message + "'!", true)); }
 	
@@ -2640,7 +2685,7 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 	if (header && header.length > 0) {
 		try { // Extract comment header
 			header = header[0].commentsHeaderRenderer;
-			commentData.count = header.countText? yt_parseNum(yt_parseLabel(header.countText)) : (header.commentsCount? yt_parseNum(yt_parseLabel(header.commentsCount)) : 0);
+			commentData.count = header.countText? yt_parseNum(yt_parseLabel(header.countText)) : (header.commentsCount? yt_parseNum(yt_parseLabel(header.commentsCount)) : (commentData.count || 0));
 			var sortList = header.sortMenu.sortFilterSubMenuRenderer.subMenuItems;
 			commentData.conTokenTop = sortList[0].serviceEndpoint.continuationCommand.token;
 			commentData.conTokenNew = sortList[1].serviceEndpoint.continuationCommand.token;
@@ -3103,6 +3148,7 @@ function ui_shortenBytes (num) {
 	return ui_shortenNumber(num, "GMK") + "B";
 }
 function ui_shortenNumber (num, bmk) {
+	if (num == undefined) return "---";
 	if (!bmk) bmk = "BMK";
 	var p = function (from, to) { return ((num - num%Math.pow(10,from)) - (num - num%Math.pow(10,to || from+3))) / Math.pow(10,from); }
 	if (num >= 1000000000) return p(9) + "," + p(7,8) + bmk[0];
@@ -3113,6 +3159,7 @@ function ui_shortenNumber (num, bmk) {
 	return num + "";
 }
 function ui_formatNumber (num) {
+	if (num == undefined) return "---"
 	var p = function (from, to) { 
 		var n = "" + ((num - num%Math.pow(10,from)) - (num - num%Math.pow(10,to || from+3))) / Math.pow(10,from);
 		while (to && n.length < to-from) n = "0" + n;
@@ -3307,9 +3354,14 @@ function ui_setVideoMetadata() {
 	I("vdViews").innerText = ui_formatNumber(yt_video.meta.views) + " views";
 	if (yt_video.meta.likes != undefined) {
 		I("vdUpvotes").innerText = ui_shortenNumber(yt_video.meta.likes);
-		I("vdDownvotes").innerText = ui_shortenNumber(yt_video.meta.dislikes);
-		I("vdSentiment").style.width = (yt_video.meta.likes/(yt_video.meta.dislikes+yt_video.meta.likes)*100) + "%";
-		I("vdSentiment").parentElement.style.display = "block";
+		if (yt_video.meta.dislikes != undefined) {
+			I("vdDownvotes").innerText = ui_shortenNumber(yt_video.meta.dislikes);
+			I("vdSentiment").style.width = (yt_video.meta.likes/(yt_video.meta.dislikes+yt_video.meta.likes)*100) + "%";
+			I("vdSentiment").parentElement.style.display = "block";
+		} else {
+			I("vdDownvotes").innerText = "";
+			I("vdSentiment").parentElement.style.display = "none";
+		}
 	} else {
 		I("vdUpvotes").innerText = "---";
 		I("vdDownvotes").innerText = "---";
@@ -3358,6 +3410,15 @@ function ui_setVideoMetadata() {
 		sec_comments.style.display = "block";
 		if (!yt_page.isDesktop) // can't sort comments on mobile
 			I("commentContextActions").style.display = "none"; 
+			if (yt_video.comments.unavailable) {
+				I("vdCommentLabel").innerText = "Comments are unavailable!";
+				I("vdCommentList").innerHTML = "";
+			} else if (yt_video.comments.deactivated) {
+				I("vdCommentLabel").innerText = "Comments are deactivated!";
+				I("vdCommentList").innerHTML = "";
+			} else if (yt_video.comments.count) {
+				I("vdCommentLabel").innerText = ui_formatNumber (yt_video.comments.count) + " comments";
+			}
 	}
 	
 }
@@ -3490,6 +3551,10 @@ function ui_resetSearch () {
 	sec_search.style.display = "none";
 	I("searchContainer").innerHTML = "";
 }
+function ui_setSearchError (error) {
+	sec_search.style.display = "block";
+	I("searchContainer").innerHTML = error.name + " while loading Search Page: " + (error.status || error.message);
+}
 
 
 /* -------------------- */
@@ -3589,6 +3654,9 @@ function ui_resetChannelUploads () {
 	tabBar.innerHTML = "";
 	tabBar.style.display = "none";
 	I("chVideoContainer").innerHTML = "";
+}
+function ui_setChannelError (error) {
+	I("chVideoContainer").innerHTML = error.name + " while loading Channel Page: " + (error.status || error.message);
 }
 
 
