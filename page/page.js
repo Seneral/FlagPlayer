@@ -956,6 +956,7 @@ function ct_mediaLoaded () {
 		md_totalTime = yt_video.meta.length;
 		md_curTime = parseInt(new URL(window.location.href).searchParams.get("t")) || 0;
 		ui_updateTimelineProgress();
+		ct_cacheVideo(yt_video);
 		md_updateStreams(); // Fires ct_mediaReady or ct_mediaError eventually
 	}
 }
