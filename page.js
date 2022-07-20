@@ -1007,6 +1007,11 @@ function ct_mediaError (error) {
 	console.error(error.name + (error.code? " " + error.code : "") + ": " + error.status + (error.tagname? " in " + error.tagname : "") + "  ", error.stack);
 }
 function ct_mediaEnded () {
+	if (md_curTime < md_totalTime-2) {
+		console.warning("Media End Signal even when media is at " + md_curTime + "s our of " + md_totalTime + "s!")
+		// Happens often on Firefox, ends video playback prematurely
+		return;
+	}
 	md_pause ();
 	if (ct_temp.loop) {
 		md_updateTime(0);
@@ -2993,10 +2998,13 @@ function ui_updatePageLayout (forceRebuild = false) {
 		ht_main.appendChild(sec_channel);
 		ht_side.appendChild(sec_playlist);
 		ht_side.appendChild(sec_related);
-		document.body.classList.add("desktop");
-		document.body.classList.remove("mobile");
 		// Uncollapse playlist on desktop by default
 		sec_playlist.removeAttribute("collapsed");
+		// Update fixed volume toggle for mobile
+		ui_updateSoundState();
+		// Switch automatic styling
+		document.body.classList.add("desktop");
+		document.body.classList.remove("mobile");
 	}
 	if (!ct_isDesktop && (setDesktop || forceRebuild)) {
 		ht_container.insertBefore(sec_player, ht_container.firstChild);
@@ -3008,6 +3016,11 @@ function ui_updatePageLayout (forceRebuild = false) {
 		ht_mobile.appendChild(sec_comments);
 		ht_mobile.appendChild(sec_search);
 		ht_mobile.appendChild(sec_channel);
+		// Collapse playlist on desktop by default
+		sec_playlist.setAttribute("collapsed", "");
+		// Update fixed volume toggle for mobile
+		ui_updateSoundState();
+		// Switch automatic styling
 		document.body.classList.add("mobile");
 		document.body.classList.remove("desktop");
 	}
@@ -3035,6 +3048,7 @@ function ui_updatePageState () {
 }
 function ui_updateSoundState () { 
 	I("muteButton").setAttribute("state", md_pref.muted? "on" : "off");
+	I("volumeSlider").parentElement.style.width = ct_isDesktop? "" : 0;
 	I("volumeBar").style.width = (md_pref.muted? 0 : md_pref.volume*100) + "%";
 	I("volumePosition").style.left = (md_pref.muted? 0 : md_pref.volume*100) + "%";
 }
@@ -4339,6 +4353,8 @@ function onControlPrev () {
 }
 function onControlMute () {
 	md_pref.muted = !md_pref.muted;
+	if (!ct_isDesktop) // Can't be edited on mobile
+		md_pref.volume = 1.0; // Need to reset it somewhere
 	md_updateVolume();
 	ct_savePreferences();
 }

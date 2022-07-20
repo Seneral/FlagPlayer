@@ -191,7 +191,7 @@ a, a:visited, a:hover, a:active {
 .mobile .section.playlist.collapsable:not([collapsed]) {
 	display: flex;
 	flex-direction: column;
-	z-index: 10;
+	z-index: 12;
 	position: fixed;
 	top: 49px; /* header height 3.5em * 14px */
 	bottom: 0;
@@ -214,8 +214,19 @@ a, a:visited, a:hover, a:active {
 	padding: 1em 0 0;
 	margin-top: 1em;
 }
+.mobile .optionsPanel {
+	left: 0;
+}
 .mobile .fullscreenPanel {
-	padding: 2em 2em;
+	padding: 0;
+}
+.mobile .settingsPanel {
+	margin: 0;
+	max-height: 100%;
+	max-width: 100%;
+}
+.mobile .barAction.fixed {
+	min-width: 1em;
 }
 
 
@@ -503,7 +514,7 @@ a, a:visited, a:hover, a:active {
 	transition: width 0.2s;
 }
 .controlButton:hover + .controlExpander, .controlExpander:hover, .controlExpander[interacting] {
-	width: 5em;+
+	width: 5em;
 }
 .slider.controlSlider {
 	height: 100%;
@@ -644,7 +655,13 @@ a, a:visited, a:hover, a:active {
 .plHeadMain {
 	display: flex;
 	flex-direction: row;
+}
+.playlist.collapsable[collapsed] .plHeadMain {
 	height: 4em;
+}
+.playlist.collapsable:not([collapsed]) .plHeadMain {
+	min-height: 4em;
+	max-height: 5em;
 }
 .plHeadActions {
 	height: 2.5em;
@@ -658,7 +675,6 @@ a, a:visited, a:hover, a:active {
 /* Playlist Head Content */
 .plDesc {
 	flex-grow: 0;
-	flex-shrink: 0;
 	padding: 0.5em 1em;
 }
 .plTitle {
@@ -672,9 +688,15 @@ a, a:visited, a:hover, a:active {
 .plCollapser {
 	flex-grow: 0;
 	flex-shrink: 0;
-	min-width: 4em;
-	height: 100%;
 	padding: 1em;
+}
+.playlist.collapsable[collapsed] .plCollapser {
+	width: 4em;
+	height: 4em;
+}
+.playlist.collapsable:not([collapsed]) .plCollapser {
+	width: 4em;
+	height: 4em;
 }
 .plCollapser svg {
 	height: 100%;
@@ -739,7 +761,7 @@ a, a:visited, a:hover, a:active {
 .vdActionBar {
 	position: absolute;
 	right: 0;
-	bottom: 0.5em;
+	bottom: 0.65em;
 	height: 2em;
 }
 .vdSentiment {
@@ -1010,7 +1032,7 @@ a, a:visited, a:hover, a:active {
 /*region*/
 
 .fullscreenPanel {
-	z-index: 8;
+	z-index: 14;
 	position: fixed;
 	top: 0;
 	bottom: 0;
@@ -1129,7 +1151,7 @@ button {
 /* --------------------------- */
 
 .notificationContainer {
-	z-index: 9;
+	z-index: 8;
 	position: fixed;
 	bottom: 0;
 	right: 0;
@@ -1163,17 +1185,17 @@ button {
 /* ---- TEXT LABELS ---------- */
 /* --------------------------- */
 
-.oneline, .twoline {
+.oneline, .twoline, .collapsableline {
 	overflow: hidden;
 	text-overflow: ellipsis;
 	word-break: break-word;
 	overflow: hidden;
 }
-.oneline {
+.oneline, .collapsable[collapsed] .collapsableline {
 	white-space: nowrap;
 	word-break: break-word;
 }
-.twoline {
+.twoline, .collapsable:not([collapsed]) .collapsableline {
 	display: -webkit-box !important;
 	-webkit-line-clamp: 2;
 	-webkit-box-orient: vertical;
