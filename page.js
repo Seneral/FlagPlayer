@@ -230,8 +230,10 @@ const VIRT_CACHE = "https://flagplayer.seneral.dev/caches/vd-"; // Virtual adres
 const HOST_YT = "https://www.youtube.com";
 const HOST_YT_MOBILE = "https://m.youtube.com";
 const HOST_YT_IMG = "https://i.ytimg.com/vi/"; // https://i.ytimg.com/vi/ or https://img.youtube.com/vi/
-const HOST_CORS = "https://flagplayer-cors.herokuapp.com/"; // Default value only
+const HOST_CORS = "https://flagplayer-cors.seneral.dev/"; // Default value only
 //"http://localhost:8080/";
+// Some public hosts (Some might be down), DO NOT SUPPORT COMMENTS due to custom headers to forward
+//"https://proxy.cors.sh/"
 //"https://cors-anywhere.herokuapp.com/"; 
 //"http://allow-any-origin.appspot.com/";
 //"https://secret-ocean-49799.herokuapp.com/";
@@ -300,6 +302,20 @@ function sw_install () {
 /* ---- INIT ----------	*/
 /* -------------------- */
 
+Object.defineProperties(Array.prototype, {
+	extract: {
+		value: function (fn) {
+			for (let x of this) {
+				var res = fn(x);
+				if (res != undefined)
+					return res;
+			}
+		},
+		enumerable: false
+	},
+
+});
+
 function ct_init () {
 	ct_loadPreferences();
 	ui_updatePageLayout();
@@ -332,6 +348,19 @@ function ct_loadPreferences () {
 	ct_pref.autoplay = G("prefAutoplay") == "false"? false : true;
 	ct_pref.theme = G("prefTheme") || "DARK";
 	ct_pref.corsAPIHost = G("prefCorsAPIHost") || HOST_CORS;
+	if (ct_pref.corsAPIHost.includes("flagplayer-cors.herokuapp.com"))
+		ct_pref.corsAPIHost = HOST_CORS; // Was old host, not available anymore
+	else if (!ct_pref.corsAPIHost.includes("localhost") && ct_pref.corsAPIHost != HOST_CORS)
+	{ // Might have switched to a public host, notify users that new official servers are available
+		var not = ui_setNotification("newCORSServer", 'An official CORS backend is available again! <button>Use official backend</button> <br/> Public CORS hosts do not support custom headers required for comment loading and are a shared resource.');
+		not.children[0].onclick = function() {
+			ct_pref.corsAPIHost = HOST_CORS;
+			ct_savePreferences();
+			not.notClose();
+		};
+	}
+	if (!ct_pref.corsAPIHost.endsWith('/'))
+		ct_pref.corsAPIHost += '/';
 	ct_pref.relatedVideos = G("prefRelated") || "ALL";
 	ct_pref.filterCategories = (G("prefFilterCategories") || "").split(",").map(c => parseInt(c));
 	ct_pref.filterHideCompletely = G("prefFilterHideCompletely") == "false"? false : true;
@@ -423,6 +452,7 @@ function ct_loadContent () {
 		ct_page = Page.Home;
 		ct_loadHome();
 	}
+	ui_setupHome();
 	// Secondary Content (can be primary)
 	if (yt_playlistID) {
 		ct_pagePlaylist = true;
@@ -1656,7 +1686,7 @@ function yt_browse (subPath) {
 			if (ct_isAdvancedCorsHost)
 				yt_extractCookies(page, response.headers.get("x-set-cookies"));
 			
-			console.log("YT Page: ", page);
+			console.log("YT " + (page.isDesktop? "desktop" : "mobile") + " page from URL " + subPath + ": ", page);
 			return page;
 		});
 	}).catch(function(error) {
@@ -1811,8 +1841,7 @@ function yt_parseDateText (dateText) {
 	if (euMatch) return new Date(parseInt(euMatch[3]), parseInt(euMatch[2])-1, parseInt(euMatch[1]));
 }
 function yt_parseLabel (label) {
-	label = label || {};
-	return (label.runs? label.runs.reduce((t, r) => t += r.text, "") : label.simpleText) || "";
+	return label?.accessibility?.accessibilityData.label || label?.runs?.reduce((t, r) => t += r.text, "") || label?.simpleText || "";
 }
 function yt_parseText (text) {
 	return (text || "").replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -1842,7 +1871,7 @@ function yt_parseFormattedRuns(runs) {
 	return text;
 }
 function yt_generateContinuationLoader(handleItems, api) {
-	return function (data) {
+	var paged_req = function (data) {
 		return PAGED_REQUEST(data.continuation, api || "browse")
 		.then(function(pagedData) {
 			data.lastPage = pagedData;
@@ -1852,8 +1881,15 @@ function yt_generateContinuationLoader(handleItems, api) {
 				contents = pagedData.continuationContents.playlistVideoListContinuation;
 				items = contents.contents;
 			} else { // Desktop
-				contents = (pagedData.onResponseReceivedActions || pagedData.onResponseReceivedEndpoints || pagedData.onResponseReceivedCommands)[0]?.appendContinuationItemsAction;
-				items = contents.continuationItems;
+				contents = pagedData.onResponseReceivedActions || pagedData.onResponseReceivedEndpoints || pagedData.onResponseReceivedCommands;
+				if (contents)
+					contents = contents[0]?.appendContinuationItemsAction;
+				if (!contents)
+				{ // This does seem to work
+					data.continuation.itctToken = pagedData.trackingParams;
+					return paged_req(data);
+				}
+				items = contents?.continuationItems;
 			}
 			// Extract item list in case they are nested
 			var itemList = items;
@@ -1866,6 +1902,7 @@ function yt_generateContinuationLoader(handleItems, api) {
 			return data.continuation != undefined;
 		});
 	};
+	return paged_req;
 }
 function yt_parseContinuationItem(itemList) {
 	c = itemList.find(v => v.continuationItemRenderer);
@@ -2184,7 +2221,30 @@ function yt_extractChannelPageTabs (initialData) {
 	
 	var tabs = [];
 	var handleContainer = function (tab, c) {
-		if (c.sectionListRenderer) { // Usually base container with multiple itemSectionRenderers
+		if (c.richGridRenderer) {
+			tab.title = "Uploads";
+			tab.continuation = yt_parseContinuationItem(c.richGridRenderer.contents);
+			tab.videos = yt_parseChannelVideos(c.richGridRenderer.contents);
+			if (!tab.continuation) tab.loadReady = true;
+			/* if (c.richGridRenderer.header)
+			{ // Does not work yet, unfortunately
+				var popularTab = c.richGridRenderer.header.feedFilterChipBarRenderer?.contents.extract(r => r.chipCloudChipRenderer.text.simpleText.toLowerCase() == "popular"? r.chipCloudChipRenderer : undefined);
+				if (popularTab)
+				{ // Add secondary tab with different ordering
+					var popTab = {};
+					popTab.title = "Popular";
+					popTab.browseContent = {
+						startURL: popularTab.navigationEndpoint.commandMetadata.webCommandMetadata.apiUrl,
+						itctToken: popularTab.navigationEndpoint.clickTrackingParams,
+					};
+					tab.videos = [];
+					popTab.id = "popular";
+					tabs.push(popTab);
+				}
+			} */
+			
+		}
+		else if (c.sectionListRenderer) { // Usually base container with multiple itemSectionRenderers
 			var listContent;
 			if (c.sectionListRenderer.subMenu) {
 				var sub = c.sectionListRenderer.subMenu.channelSubMenuRenderer;
@@ -2219,9 +2279,10 @@ function yt_extractChannelPageTabs (initialData) {
 				listID: play.watchEndpoint.playlistId,
 				itctToken: play.clickTrackingParams,
 			};
-			if (s.endpoint.commandMetadata.webCommandMetadata.url.includes("shelf_id")) { // Usually when content is gridRenderer
+			var browseUrl = (s.endpoint.commandMetadata.webCommandMetadata.url || s.endpoint.commandMetadata.webCommandMetadata.apiUrl);
+			if (browseUrl.includes("shelf_id")) { // Usually when content is gridRenderer
 				tab.browseContent = { // May imply that associated list does not contain all videos - only separate shelf browse page does
-					startURL: s.endpoint.commandMetadata.webCommandMetadata.url,
+					startURL: browseUrl,
 					itctToken: s.endpoint.clickTrackingParams,
 				};
 			}
@@ -2246,12 +2307,13 @@ function yt_extractChannelPageTabs (initialData) {
 	return tabs;
 }
 function yt_parseChannelVideos (itemList) {
-	return itemList.filter(v => v.gridVideoRenderer || v.compactVideoRenderer).map(function (v) {
-		v = v.gridVideoRenderer || v.compactVideoRenderer;
+	return itemList.filter(v => v.gridVideoRenderer || v.richItemRenderer || v.compactVideoRenderer).map(function (v) {
+		v = v.richItemRenderer?.content || v;
+		v = v.videoRenderer || v.gridVideoRenderer || v.compactVideoRenderer;
 		return { 
 			title: yt_parseLabel(v.title),
 			videoID: v.videoId,
-			views: yt_parseNum(yt_parseLabel(v.viewCountText)),
+			views: yt_parseNum(yt_parseLabel(v.viewCountText || v.shortViewCountText)),
 			length: v.thumbnailOverlays.reduce((t, v) => v.thumbnailOverlayTimeStatusRenderer? yt_parseTime(yt_parseLabel(v.thumbnailOverlayTimeStatusRenderer.text)) : t, 0),
 			thumbnailURL: yt_selectThumbnail(v.thumbnail.thumbnails),
 			uploadedTimeAgoText: yt_parseLabel(v.publishedTimeText),
@@ -2416,9 +2478,8 @@ function yt_extractVideoMetadata(page, video) {
 			meta.views = meta.views || yt_parseNum(primary.viewCount.videoViewCountRenderer.viewCount.simpleText);
 			// Ratings
 			if (meta.allowRatings) {
-				sentimentButtons = primary.videoActions.menuRenderer.topLevelButtons.filter(c => c.toggleButtonRenderer);
-				likeButton = sentimentButtons.find(c => c.toggleButtonRenderer.targetId == "watch-like").toggleButtonRenderer;
-				meta.likes = yt_parseNum(likeButton.defaultText.accessibility.accessibilityData.label);
+				var likeButton = primary.videoActions.menuRenderer.topLevelButtons.extract(c => c.segmentedLikeDislikeButtonRenderer?.likeButton?.toggleButtonRenderer || (c.toggleButtonRenderer?.targetId == "watch-like"? c.toggleButtonRenderer : undefined));
+				meta.likes = yt_parseNum(yt_parseLabel(likeButton.defaultText));
 				meta.dislikes = undefined;
 			}
 			// Subscribers
@@ -2448,9 +2509,8 @@ function yt_extractVideoMetadata(page, video) {
 			meta.views = yt_parseNum(yt_parseLabel(mainContainer.expandedSubtitle));
 			// Ratings
 			if (meta.allowRatings) {
-				var actionContainer = videoData.contents.find(c => c.slimVideoActionBarRenderer).slimVideoActionBarRenderer;
-				var likeButton = actionContainer.buttons.find(b => b.slimMetadataToggleButtonRenderer && b.slimMetadataToggleButtonRenderer.isLike).slimMetadataToggleButtonRenderer.button.toggleButtonRenderer;	
-				meta.likes = yt_parseNum(likeButton.defaultText.accessibility.accessibilityData.label);;
+				var likeButton = videoData.contents.extract(c => c.slimVideoActionBarRenderer)?.buttons.extract(b => b.slimMetadataButtonRenderer?.button.segmentedLikeDislikeButtonRenderer).likeButton?.toggleButtonRenderer;	
+				meta.likes = yt_parseNum(yt_parseLabel(likeButton?.defaultText));
 				meta.dislikes = undefined;
 			}
 			// Subscribers
@@ -2690,11 +2750,13 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 	if (header && header.length > 0) {
 		try { // Extract comment header
 			header = header[0].commentsHeaderRenderer;
-			commentData.count = header.countText? yt_parseNum(yt_parseLabel(header.countText)) : (header.commentsCount? yt_parseNum(yt_parseLabel(header.commentsCount)) : (commentData.count || 0));
-			var sortList = header.sortMenu.sortFilterSubMenuRenderer.subMenuItems;
-			commentData.conTokenTop = sortList[0].serviceEndpoint.continuationCommand.token;
-			commentData.conTokenNew = sortList[1].serviceEndpoint.continuationCommand.token;
-			commentData.sorted = sortList[0].selected? "TOP" : "NEW";
+			commentData.count = yt_parseNum(yt_parseLabel(header.countText || header.commentsCount)) || commentData.count || 0;
+			var sortList = header.sortMenu?.sortFilterSubMenuRenderer.subMenuItems;
+			if (sortList) {
+				commentData.conTokenTop = sortList[0].serviceEndpoint.continuationCommand.token;
+				commentData.conTokenNew = sortList[1].serviceEndpoint.continuationCommand.token;
+				commentData.sorted = sortList[0].selected? "TOP" : "NEW";
+			}
 		} catch (e) { ct_mediaError(new ParseError(132, "Failed to extract comment header: '" + e.message + "'!", true)); }
 	} // Only in first main request, never reply requests
 
@@ -3637,6 +3699,7 @@ function ui_fillChannelTab (tab) {
 	if (tab.loadReady)
 		ui_addChannelUploads(tab.container, tab.videos, 0);
 	// Setup Loader
+	// TODO: This rarely loads the first set of videos that was already parsed again
 	var loader = yt_generateContinuationLoader(function (tab, itemList) {
 		newVideos = yt_parseChannelVideos(itemList);
 		tab.videos = tab.videos.concat(newVideos);
@@ -3774,13 +3837,13 @@ function ui_setNotification(id, text, timeout = undefined) {
 		not.notContent = not.children[0];
 		not.notOnClose = undefined;
 		not.notClose = function() { 
+			clearTimeout(not.timeout);
 			if (not.notOnClose) not.notOnClose();
-			if (not.timeout) clearTimeout(not.timeout);
-			I("notificationContainer").removeChild(not);
+			not.parentNode?.removeChild(not);
 		};
 		not.children[2].onclick = not.notClose;
 	}
-	if (not.timeout) clearTimeout(not.timeout);
+	clearTimeout(not.timeout);
 	if (timeout != undefined) {
 		not.timout = setTimeout(function() {
 			not.timeout = undefined;
@@ -4276,7 +4339,10 @@ function onSettingsChange (hint) {
 	switch (hint) {
 		case "CH":
 			ct_pref.corsAPIHost = I("st_corsHost").value;
-			if (!ct_pref.corsAPIHost.endsWith("/")) ct_pref.corsAPIHost += "/";
+			if (!ct_pref.corsAPIHost.endsWith('/')) {
+				ct_pref.corsAPIHost += '/';
+				I("st_corsHost").value += '/';
+			}
 			break;
 		case "FV":
 			ct_pref.filterHideCompletely = I("st_filter_hide").checked;
@@ -4353,8 +4419,8 @@ function onControlPrev () {
 }
 function onControlMute () {
 	md_pref.muted = !md_pref.muted;
-	if (!ct_isDesktop) // Can't be edited on mobile
-		md_pref.volume = 1.0; // Need to reset it somewhere
+	/* if (!ct_isDesktop) // Can't be edited on mobile
+		md_pref.volume = 1.0; // Need to reset it somewhere */
 	md_updateVolume();
 	ct_savePreferences();
 }
