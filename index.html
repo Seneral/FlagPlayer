@@ -519,11 +519,17 @@ See https://github.com/Seneral/FlagPlayer for details
 			<!--<filter id="svg_shadow" x="-50%" y="-50%" width="200%" height="200%">
 				<feDropShadow dx="0" dy="0" stdDeviation="3"/>
 			</filter>-->
-			<filter id="svg_shadow" x="-25%" y="-25%" width="150%" height="150%" filterUnits="objectBoundingBox">
+			<filter id='svg_shadow' x="-50%" y="-50%" width="200%" height="200%" filterUnits="objectBoundingBox">
+				<feFlood flood-color='#0006'/>
+				<feComposite operator='in' in2='SourceGraphic'/>
+				<feGaussianBlur stdDeviation='4'/>
+				<feBlend in='SourceGraphic' in2='glow'/>
+			</filter>
+			<!-- <filter id="svg_shadow" x="-25%" y="-25%" width="150%" height="150%" filterUnits="objectBoundingBox">
 				<feGaussianBlur result="blurOut" in="SourceAlpha" stdDeviation="5" />
 				<feColorMatrix result="colorOut" in="blurOut" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 0.4 0"/>
 				<feBlend in="SourceGraphic" in2="colorOut" mode="normal" />
-			</filter>
+			</filter> -->
 			<!-- Icon Background Dish -->
 			<!-- Playback Control Icons -->
 			<path id="svg_left" d="M 16,16 19,16 19,32 16,32 Z M 21.5,24 32,16 32,32 Z"></path>

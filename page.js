@@ -634,6 +634,10 @@ function ct_triggerPagedContent(pagedContent) {
 /* ---- HOME ----------	*/
 /* -------------------- */
 
+function ct_navHome() {
+	ct_beforeNav();
+	ct_performNav();
+}
 function ct_loadHome () {
 	ui_setupHome();
 }
@@ -991,10 +995,14 @@ function ct_mediaLoaded () {
 }
 function ct_mediaReady () {
 	md_flags.buffering = false;
-	if (md_paused && md_state == State.Loading) // Means media is ready, but playback was denied
+	if (md_paused && md_state == State.Loading) {
+		// Means media is ready, but playback was denied
+		if (navigator.mediaSession) navigator.mediaSession.playbackState = "paused";
 		md_state = State.PreStart;
-	else // Playback start was successful
+	} else { // Playback start was successful
 		md_state = State.Started;
+		if (navigator.mediaSession) navigator.mediaSession.playbackState = md_paused? "paused" : "playing";
+	}
 	ui_updatePlayerState();
 }
 function ct_mediaError (error) {
@@ -1071,6 +1079,8 @@ function ct_mediaUnload () {
 	md_curTime = 0;
 	md_totalTime = 0;
 
+	if (navigator.mediaSession) navigator.mediaSession.playbackState = "none";
+
 	md_resetStreams();
 	ui_updateTimelineProgress();
 	ui_updateTimelineBuffered();
@@ -1091,12 +1101,14 @@ function ct_mediaUnload () {
 function ct_mediaPlayPause (value, indirect) {
 	ct_stopAutoplay();
 	if (md_state != State.None && (md_state != State.Error || md_sources))	{
-		if (md_state == State.Ended || md_state == State.Error) md_paused = false;
+		if (!indirect && (md_state == State.Ended || md_state == State.Error)) md_paused = false;
 		else md_paused = value;
 		if (!md_sources) {
 			md_state = State.Loading;
+			if (navigator.mediaSession) navigator.mediaSession.playbackState = "none";
 		} else if (md_paused) {
 			md_pause(true);
+			if (navigator.mediaSession) navigator.mediaSession.playbackState = "paused";
 			if (indirect) ui_indicatePause();
 		} else {
 			if (md_state == State.Ended) md_curTime = 0;
@@ -1106,6 +1118,8 @@ function ct_mediaPlayPause (value, indirect) {
 				ct_stopAutoplay();
 				return;
 			}
+			if (navigator.mediaSession) navigator.mediaSession.playbackState = "playing"; // Not yet playing
+			// After attempt completes, ct_mediaReady will set to actual state
 			if (indirect) ui_indicatePlay();
 		}
 	}
@@ -4281,6 +4295,9 @@ function ui_setupEventHandlers () {
 		navigator.mediaSession.setActionHandler('pause', function() {
 			ct_mediaPlayPause(true, true);
 		});
+		navigator.mediaSession.setActionHandler('stop', function() {
+			ct_navHome();
+		});
 		navigator.mediaSession.setActionHandler('previoustrack', function() {
 			history.back();
 		});
@@ -4512,7 +4529,7 @@ function onMouseClick (mouse) {
 	if (mouse.target.classList.contains("controlOverlay")) {
 		// Don't register touch when control bar isn't shown (it will be shown afterwards, though)
 		var isTouch = mouse.sourceCapabilities && mouse.sourceCapabilities.firesTouchEvents;
-		if (!overridePlayer && (ct_temp.showControlBar || !isTouch))  
+		if (!overridePlayer && (ct_temp.showControlBar || !isTouch))
 			ct_mediaPlayPause(!md_paused, true);
 		mouse.preventDefault();
 	}

@@ -482,7 +482,7 @@ a, a:visited, a:hover, a:active {
 .controlBar span {
 	margin: 0 0.2em;
 	color: #eee;
-	text-shadow: 0 0 0.3em #000, 0 0 0.1em #000;
+	text-shadow: 0 0 0.2em #0008, 0 0 0.5em #0008;
 }
 .controlButton {
 	position: relative;
