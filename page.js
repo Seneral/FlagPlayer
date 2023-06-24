@@ -888,8 +888,8 @@ function ct_loadMedia () {
 	// Load and display cached data
 	var cacheLoad = db_getVideo(yt_videoID).then(function (video) {
 		if (!yt_video || loadingID != yt_videoID) return Promise.reject();
-		yt_video.cached = true;
-		yt_video.cache = video.cache;
+		yt_video.cachedMetadata = true;
+		yt_video.mediaCache = video.cache;
 		if (yt_video.meta != undefined) return Promise.resolve();
 		yt_video.meta = {
 			title: video.title,
@@ -945,7 +945,7 @@ function ct_loadMedia () {
 		if (error instanceof NetworkError)
 			ct_online = false;
 		cacheLoad.then(function() {
-			if (yt_video.cache != undefined) {
+			if (yt_video.mediaCache != undefined) {
 				console.error(error.name + (error.code? " " + error.code : "") + ": " + error.status + "  ", error.stack);
 				console.warn("Error while loading ... Using cache fallback!");
 				yt_video.streams = [];
@@ -1598,7 +1598,7 @@ function db_deleteCachedStream (cacheID) {
 			return new Promise (function (resolve, reject) {
 				dbVideos.get(cacheID).onsuccess = function (e) {
 					e.target.result.cache = undefined;
-					if (yt_video && yt_video.videoID == cacheID) yt_video.cache = undefined;
+					if (yt_video && yt_video.videoID == cacheID) yt_video.mediaCache = undefined;
 					dbVideos.put(e.target.result).onsuccess = resolve;
 				};
 			});
@@ -1855,7 +1855,8 @@ function yt_parseDateText (dateText) {
 	if (euMatch) return new Date(parseInt(euMatch[3]), parseInt(euMatch[2])-1, parseInt(euMatch[1]));
 }
 function yt_parseLabel (label) {
-	return label?.accessibility?.accessibilityData.label || label?.runs?.reduce((t, r) => t += r.text, "") || label?.simpleText || "";
+	return label?.runs?.reduce((t, r) => t += r.text, "") || label?.simpleText || label?.accessibility?.accessibilityData.label || "";
+	// Used to prefer accessibility data since numbers were more detailed, but now, some accessibility texts are longer (e.g. title by uploader instead of title)
 }
 function yt_parseText (text) {
 	return (text || "").replace(/</g,'&lt;').replace(/>/g,'&gt;');
@@ -2083,16 +2084,19 @@ function yt_loadSearchPage(searchTerms, background) {
 	});
 }
 function yt_parseSearchResults(itemList) {
-	return itemList.map(function (v) {
-		if (v.videoRenderer || v.compactVideoRenderer || (v.richItemRenderer && (v.richItemRenderer.content.videoRenderer || v.richItemRenderer.content.compactVideoRenderer)))
+	return itemList.map(function (i) {
+		if (i.infoPanelContainerRenderer) return undefined; // Just a banner at the top (mobile)
+		if (i.reelShelfRenderer) return undefined; // Ignore side-scrolling short shelfs that go on for dozens of videos (mobile)
+		var v = i.videoRenderer || i.compactVideoRenderer || i.richItemRenderer?.content.videoRenderer || i.richItemRenderer?.content.compactVideoRenderer || i.videoWithContextRenderer;
+		var p = i.playlistRenderer || i.compactPlaylistRenderer;
+		if (v)
 		{
-			v = v.videoRenderer || v.compactVideoRenderer || v.richItemRenderer.content.videoRenderer || v.richItemRenderer.content.compactVideoRenderer;
-			u = (v.ownerText || v.shortBylineText)?.runs?.[0]?.navigationEndpoint;
+			var u = (v.ownerText || v.shortBylineText)?.runs?.[0]?.navigationEndpoint;
 			return {
 				videoID: v.videoId,
-				title: yt_parseLabel(v.title),
+				title: yt_parseLabel(v.title || v.headline),
 				length: yt_parseTime(yt_parseLabel(v.lengthText)),
-				views: yt_parseNum(yt_parseLabel(v.viewCountText)),
+				views: yt_parseNum(yt_parseLabel(v.viewCountText || v.shortViewCountText)),
 				uploadedTimeAgoText: yt_parseLabel(v.publishedTimeText),
 				thumbnailURL: yt_selectThumbnail(v.thumbnail.thumbnails),
 				descriptionSnippet: yt_parseText(yt_parseLabel(v.descriptionSnippet)),
@@ -2104,23 +2108,22 @@ function yt_parseSearchResults(itemList) {
 				itctToken: v.navigationEndpoint.clickTrackingParams,
 			};
 		}
-		else if (v.playlistRenderer || v.compactPlaylistRenderer)
+		else if (p)
 		{
-			v = v.playlistRenderer || v.compactPlaylistRenderer;
-			u = (v.ownerText || v.shortBylineText)?.runs?.[0]?.navigationEndpoint;
+			var u = (p.ownerText || p.shortBylineText)?.runs?.[0]?.navigationEndpoint;
 			return {
-				listID: v.playlistId,
-				title: yt_parseLabel(v.title),
-				count: yt_parseNum(yt_parseLabel(v.videoCountText)),
-//				views: yt_parseNum(yt_parseLabel(v.viewCountText)),
-//				updatedTimeAgoText: yt_parseLabel(v.publishedTimeText),
-				thumbnailURL: yt_selectThumbnail(v.thumbnail?.thumbnails || v.thumbnailRenderer.playlistVideoThumbnailRenderer.thumbnail.thumbnails),
+				listID: p.playlistId,
+				title: yt_parseLabel(p.title),
+				count: yt_parseNum(yt_parseLabel(p.videoCountText)),
+//				views: yt_parseNum(yt_parseLabel(p.viewCountText)),
+//				updatedTimeAgoText: yt_parseLabel(p.publishedTimeText),
+				thumbnailURL: yt_selectThumbnail(p.thumbnail?.thumbnails || p.thumbnailRenderer.playlistVideoThumbnailRenderer.thumbnail.thumbnails),
 				author: {
-					name: yt_parseLabel(v.ownerText || v.shortBylineText),
+					name: yt_parseLabel(p.ownerText || p.shortBylineText),
 					channelID: u?.browseEndpoint?.browseId,
 					url: u?.browseEndpoint?.canonicalBaseUrl || u?.commandMetadata?.webCommandMetadata?.url,
 				},
-				itctToken: v.navigationEndpoint.clickTrackingParams,
+				itctToken: p.navigationEndpoint.clickTrackingParams,
 			};
 		}
 		// TODO: Add support for playlistRenderer and channelRenderer (theres other horizontal shelves too)
@@ -3438,7 +3441,7 @@ function ui_resetStreams () {
 /* -------------------- */
 
 function ui_setVideoMetadata() {
-	if (!yt_video.cached && !yt_video.loaded) return;
+	if (!yt_video.cachedMetadata && !yt_video.loaded) return;
 	sec_video.style.display = "block";
 	I("vdTitle").innerText = yt_video.meta.title;
 	I("vdViews").innerText = ui_formatNumber(yt_video.meta.views) + " views";
@@ -4812,9 +4815,9 @@ function md_updateStreams ()  {
 	md_sources = {};
 	if (md_pref.dash) {
 		md_sources.video = selectedStreams.dashVideo? selectedStreams.dashVideo.url : '';
-		md_sources.audio = yt_video.cache && (ct_pref.cacheForceUse || !ct_online)? yt_video.cache.url 
+		md_sources.audio = yt_video.mediaCache && (ct_pref.cacheForceUse || !ct_online)? yt_video.mediaCache.url 
 			: (selectedStreams.dashAudio? selectedStreams.dashAudio.url
-					: (yt_video.cache? yt_video.cache.url : ''));
+					: (yt_video.mediaCache? yt_video.mediaCache.url : ''));
 	} else {
 		md_sources.video = selectedStreams.legacyVideo? selectedStreams.legacyVideo.url : '';
 		md_sources.audio = '';
