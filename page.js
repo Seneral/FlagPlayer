@@ -1842,6 +1842,8 @@ function yt_parseNum (numText) {
 	return num;
 }
 function yt_selectThumbnail (thumbnails) {
+	if (!Array.isArray(thumbnails))
+	thumbnails = thumbnails.thumbnails;
 	var url = (thumbnails || []).sort(function(t1, t2) { return t1.height > t2.height? -1 : 1 })[0]?.url || "";
 	if (url.startsWith("//"))
 		return "https:" + url;
@@ -2004,7 +2006,7 @@ function yt_extractPlaylistData(playlist, initialData) {
 	playlist.count = yt_parseNum(yt_parseLabel(prim?.stats.find(s => yt_parseLabel(s).includes("videos"))));
 	playlist.description = yt_parseText(yt_parseLabel(prim?.descriptionText || prim?.description));
 	playlist.thumbnailURL = prim?.thumbnailRenderer? 
-		yt_selectThumbnail(prim?.thumbnailRenderer.playlistVideoThumbnailRenderer.thumbnail.thumbnails)
+		yt_selectThumbnail(prim?.thumbnailRenderer.playlistVideoThumbnailRenderer.thumbnail)
 		: HOST_YT_IMG + playlist.videos[0].videoID + '/default.jpg';
 }
 function yt_parsePlaylistVideos(itemList) {
@@ -2017,7 +2019,7 @@ function yt_parsePlaylistVideos(itemList) {
 			videoID: v.videoId,
 			unavailable: !available,
 			length: yt_parseNum(v.lengthSeconds),
-			thumbnailURL: available? yt_selectThumbnail(v.thumbnail.thumbnails) : "https://i.ytimg.com/img/no_thumbnail.jpg",
+			thumbnailURL: available? yt_selectThumbnail(v.thumbnail) : "https://i.ytimg.com/img/no_thumbnail.jpg",
 			uploader: {
 				name: available? yt_parseLabel(v.shortBylineText) : undefined,
 				channelID: u?.browseEndpoint?.browseId,
@@ -2098,7 +2100,7 @@ function yt_parseSearchResults(itemList) {
 				length: yt_parseTime(yt_parseLabel(v.lengthText)),
 				views: yt_parseNum(yt_parseLabel(v.viewCountText || v.shortViewCountText)),
 				uploadedTimeAgoText: yt_parseLabel(v.publishedTimeText),
-				thumbnailURL: yt_selectThumbnail(v.thumbnail.thumbnails),
+				thumbnailURL: yt_selectThumbnail(v.thumbnail),
 				descriptionSnippet: yt_parseText(yt_parseLabel(v.descriptionSnippet)),
 				uploader: {
 					name: yt_parseLabel(v.ownerText || v.shortBylineText),
@@ -2117,7 +2119,7 @@ function yt_parseSearchResults(itemList) {
 				count: yt_parseNum(yt_parseLabel(p.videoCountText)),
 //				views: yt_parseNum(yt_parseLabel(p.viewCountText)),
 //				updatedTimeAgoText: yt_parseLabel(p.publishedTimeText),
-				thumbnailURL: yt_selectThumbnail(p.thumbnail?.thumbnails || p.thumbnailRenderer.playlistVideoThumbnailRenderer.thumbnail.thumbnails),
+				thumbnailURL: yt_selectThumbnail(p.thumbnail || p.thumbnailRenderer.playlistVideoThumbnailRenderer?.thumbnail || p.thumbnailRenderer.playlistCustomThumbnailRenderer?.thumbnail),
 				author: {
 					name: yt_parseLabel(p.ownerText || p.shortBylineText),
 					channelID: u?.browseEndpoint?.browseId,
@@ -2161,12 +2163,12 @@ function yt_extractChannelMetadata(initialData) {
 		var header = initialData.header.c4TabbedHeaderRenderer;
 		meta.name = header.title;
 		meta.channelID = header.channelId;
-		meta.profileImg = yt_selectThumbnail(header.avatar.thumbnails);
-		meta.bannerImg = header.banner? yt_selectThumbnail(header.banner.thumbnails) : undefined;
+		meta.profileImg = yt_selectThumbnail(header.avatar);
+		meta.bannerImg = header.banner? yt_selectThumbnail(header.banner) : undefined;
 		meta.url = header.navigationEndpoint.browseEndpoint.canonicalBaseUrl;
 		meta.subscribers = yt_parseNum(yt_parseLabel(header.subscriberCountText));
 		var chLinks = header.headerLinks? (header.headerLinks.channelHeaderLinksRenderer.primaryLinks || []).concat(header.headerLinks.channelHeaderLinksRenderer.secondaryLinks || []) : [];
-		meta.links = chLinks.map(l => { return { title: l.title.simpleText, icon: l.icon? yt_selectThumbnail(l.icon.thumbnails) : undefined, link: l.navigationEndpoint.urlEndpoint.url }; });
+		meta.links = chLinks.map(l => { return { title: l.title.simpleText, icon: l.icon? yt_selectThumbnail(l.icon) : undefined, link: l.navigationEndpoint.urlEndpoint.url }; });
 	} catch (e) { console.error("Failed to extract channel metadata!", e, initialData); }
 
 	try { // Extract secondary metadata
@@ -2332,7 +2334,7 @@ function yt_parseChannelVideos (itemList) {
 			videoID: v.videoId,
 			views: yt_parseNum(yt_parseLabel(v.viewCountText || v.shortViewCountText)),
 			length: v.thumbnailOverlays.reduce((t, v) => v.thumbnailOverlayTimeStatusRenderer? yt_parseTime(yt_parseLabel(v.thumbnailOverlayTimeStatusRenderer.text)) : t, 0),
-			thumbnailURL: yt_selectThumbnail(v.thumbnail.thumbnails),
+			thumbnailURL: yt_selectThumbnail(v.thumbnail),
 			uploadedTimeAgoText: yt_parseLabel(v.publishedTimeText),
 			itctToken: v.navigationEndpoint.clickTrackingParams,
 		}; 
@@ -2461,7 +2463,7 @@ function yt_extractVideoMetadata(page, video) {
 		var videoDetail = page.config.videoDetails;
 		meta.title = videoDetail.title;
 		meta.description = yt_parseText(videoDetail.shortDescription);
-		meta.thumbnailURL = yt_selectThumbnail(videoDetail.thumbnail.thumbnails);
+		meta.thumbnailURL = yt_selectThumbnail(videoDetail.thumbnail);
 		meta.length = parseInt(videoDetail.lengthSeconds);
 		meta.uploader = {
 			name: videoDetail.author,
@@ -2541,7 +2543,7 @@ function yt_extractVideoMetadata(page, video) {
 		meta.uploader.channelID = uploaderContainer.navigationEndpoint.browseEndpoint.browseId;
 		meta.uploader.url = uploaderContainer.navigationEndpoint.browseEndpoint.canonicalBaseUrl;
 		meta.uploader.userID = meta.uploader.url.startsWith ("/user/")? meta.uploader.url.substring(6) : undefined;
-		meta.uploader.profileImg = yt_selectThumbnail(uploaderContainer.thumbnail.thumbnails);
+		meta.uploader.profileImg = yt_selectThumbnail(uploaderContainer.thumbnail);
 		meta.uploader.badge = uploaderContainer.badges && uploaderContainer.badges.length > 0? uploaderContainer.badges[0].metadataBadgeRenderer.tooltip : undefined;
 	} catch (e) { ct_mediaError(new ParseError(112, "Failed to read video uploader metadata: '" + e.message + "'!", true)); }
 
@@ -2611,7 +2613,7 @@ function yt_parseRelatedVideos (itemList) {
 				videoID: v.videoId,
 				views: yt_parseNum(yt_parseLabel(v.viewCountText || v.shortViewCountText)),
 				length: yt_parseTime(yt_parseLabel(v.lengthText)),
-				thumbnailURL: yt_selectThumbnail(v.thumbnail.thumbnails),
+				thumbnailURL: yt_selectThumbnail(v.thumbnail),
 				itctToken: v.navigationEndpoint.clickTrackingParams,
 			};
 			var uLink = v.shortBylineText.runs[0].navigationEndpoint.browseEndpoint;
@@ -2622,7 +2624,7 @@ function yt_parseRelatedVideos (itemList) {
 				channelID: uLink.browseId,
 				url: uLink.canonicalBaseUrl? uLink.canonicalBaseUrl : "/channel/" + uLink.browseId,
 				userID: uLink.canonicalBaseUrl && uLink.canonicalBaseUrl.startsWith ("/user/")? uLink.canonicalBaseUrl.substring(6) : undefined,
-				profileImg: yt_selectThumbnail(v.channelThumbnail.thumbnails),
+				profileImg: yt_selectThumbnail(v.channelThumbnail),
 				badge: v.ownerBadges && v.ownerBadges.length > 0? v.ownerBadges[0].metadataBadgeRenderer.tooltip : undefined,
 				itctToken: v.shortBylineText.runs[0].navigationEndpoint.clickTrackingParams,
 			};
@@ -2806,7 +2808,7 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 					channelID: comm.authorEndpoint.browseEndpoint.browseId,
 					url: comm.authorEndpoint.browseEndpoint.canonicalBaseUrl,
 					userID: comm.authorEndpoint.browseEndpoint.canonicalBaseUrl.startsWith("/user/")? comm.authorEndpoint.browseEndpoint.canonicalBaseUrl.substring(6) : undefined,
-					profileImg: yt_selectThumbnail(comm.authorThumbnail.thumbnails),
+					profileImg: yt_selectThumbnail(comm.authorThumbnail),
 					isUploader: comm.authorIsChannelOwner,
 				};
 				if (thread) { // Main, first stage comment
