@@ -587,22 +587,38 @@ function ct_registerPagedContent(id, container, loadFunc, trigger, data, showLoa
 	var pagedContent = {
 		id: id,
 		container: container,
-		autoTrigger: Number.isInteger (trigger)? true : trigger,
-		triggerDistance: Number.isInteger (trigger)? trigger : undefined,
+		autoTrigger: Number.isInteger(trigger)? true : trigger,
+		triggerDistance: Number.isInteger(trigger)? trigger : undefined,
 		loadFunc: loadFunc,
 		loading: false,
 		index: 0,
 		data: data,
 		loader: showLoader
 	};
-	ct_pagedContent.push (pagedContent);
+	ct_pagedContent.push(pagedContent);
 	return pagedContent;
 }
 function ct_removePagedContent(id) {
 	var i;
 	while ((i = ct_pagedContent.findIndex(p => p.id == id)) >= 0) {
-		if (ct_pagedContent[i].loading) ct_pagedContent[i].aborted = true;
+		ct_abortPagedContent(ct_pagedContent[i]);
 		ct_pagedContent.splice(i, 1);
+	}
+}
+function ct_removePagedContentAll(id) {
+	for (var i = 0; i < ct_pagedContent.length; i++) {
+		if (ct_pagedContent[i].id.startsWith(id)) {
+			ct_abortPagedContent(ct_pagedContent[i]);
+			ct_pagedContent.splice(i, 1);
+		}
+	}
+}
+function ct_abortPagedContent(pagedContent) {
+	if (pagedContent.loading)
+	{
+		pagedContent.aborted = true;
+		if (pagedContent.loader)
+			ui_removeLoadingIndicator(pagedContent.container);
 	}
 }
 function ct_getPagedContent(id) {
@@ -621,19 +637,23 @@ function ct_checkPagedContent() {
 function ct_triggerPagedContent(pagedContent) {
 	if (!pagedContent) return;
 	if (pagedContent.aborted)
-		return ct_removePagedContent(pagedContent.id);
+		return;
 	if (pagedContent.loading)
 		return;
 	pagedContent.loading = true;
 	if (pagedContent.loader)
 		ui_addLoadingIndicator(pagedContent.container);
 	// Perform content loading
-	pagedContent.loadFunc(pagedContent.data)
+	pagedContent.loadFunc(pagedContent.data, pagedContent)
 	.then(function(hasContinuation){
+		if (pagedContent.aborted)
+			return;
 		if (pagedContent.loader)
 			ui_removeLoadingIndicator(pagedContent.container);
-		if (pagedContent.aborted || !hasContinuation)
-			return ct_removePagedContent(pagedContent.id);
+		if (!hasContinuation) {
+			ct_pagedContent.splice(ct_pagedContent.findIndex(p => p == pagedContent), 1);
+			return;
+		}
 		// Continue
 		pagedContent.loading = false;
 		if (pagedContent.autoTrigger && pagedContent.triggerDistance == undefined)
@@ -852,7 +872,7 @@ function ct_loadChannel() {
 	});
 }
 function ct_resetChannel () {
-	ct_removePagedContent("CH");
+	ct_removePagedContentAll("CH");
 	ui_resetChannelMetadata();
 	ui_resetChannelUploads();
 
@@ -1040,6 +1060,7 @@ function ct_mediaError (error) {
 		console.error("Can't play selected stream!");
 		var stream = yt_video?.streams?.find(s => s.url == error.tag.src);
 		if (stream) stream.unavailable = true;
+		else console.error("Can't find stream '" + error.tag.src + "' that just played, unable to invalidate!");
 		md_updateStreams();
 		return;
 	} else if (error instanceof PlaybackError && error.code == 6) {
@@ -1085,7 +1106,7 @@ function ct_mediaEnded () {
 function ct_mediaUnload () {
 	ct_stopAutoplay();
 	ct_removePagedContent("RV");
-	ct_removePagedContent("CM");
+	ct_removePagedContentAll("CM");
 	
 	yt_videoID = undefined;
 	yt_video = undefined;
@@ -1907,9 +1928,10 @@ function yt_parseFormattedRuns(runs) {
 	return text;
 }
 function yt_generateContinuationLoader(handleItems, api) {
-	var paged_req = function (data) {
+	var paged_req = function (data, pagedContent) {
 		return PAGED_REQUEST(data.continuation, api || "browse")
 		.then(function(pagedData) {
+			if (pagedContent.aborted) return Promise.resolve();
 			data.lastPage = pagedData;
 			// Extract continuation items
 			var contents, items;
@@ -2624,13 +2646,13 @@ function yt_extractRelatedVideoData(initialData) {
 
 	return related;
 }
-function yt_loadMoreRelatedVideos (related) {
+function yt_loadMoreRelatedVideos (related, pagedContent) {
 	if (ct_pref.relatedVideos != "ALL") return Promise.resolve(true); // Still registered to allow it to load immediately when settings change
 	return yt_generateContinuationLoader(function(related, itemList){
 		var newVideos = yt_parseRelatedVideos(itemList);
 		related.videos = related.videos.concat(newVideos);
 		ui_addRelatedVideos(related.videos.length-newVideos.length);
-	}, "next")(related);
+	}, "next")(related, pagedContent);
 }
 function yt_parseRelatedVideos (itemList) {
 	return itemList.gather(function (v) {
@@ -2766,11 +2788,12 @@ function yt_loadCommentReplies (comment, replyContainer) {
 	if (!pagedContent) pagedContent = ct_registerPagedContent("CM" + comment.id, replyContainer, yt_loadMoreComments, false, comment.replyData, true);
 	ct_triggerPagedContent(pagedContent);
 }
-function yt_loadMoreComments (commentData) {
+function yt_loadMoreComments (commentData, pagedContent) {
 	if (!commentData.continuation)
 		return Promise.resolve(false);
 	return PAGED_REQUEST(commentData.continuation, "next")
 	.then(function (data) {
+		if (pagedContent.aborted) return Promise.resolve();
 		yt_video.comments.lastPage = data;
 
 		// Extract comments
