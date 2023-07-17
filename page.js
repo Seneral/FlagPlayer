@@ -1931,7 +1931,7 @@ function yt_generateContinuationLoader(handleItems, api) {
 	var paged_req = function (data, pagedContent) {
 		return PAGED_REQUEST(data.continuation, api || "browse")
 		.then(function(pagedData) {
-			if (pagedContent.aborted) return Promise.resolve();
+			if (pagedContent?.aborted) return Promise.resolve();
 			data.lastPage = pagedData;
 			// Extract continuation items
 			var contents, items;
@@ -1945,7 +1945,7 @@ function yt_generateContinuationLoader(handleItems, api) {
 				if (!contents)
 				{ // This does seem to work
 					data.continuation.itctToken = pagedData.trackingParams;
-					return paged_req(data);
+					return paged_req(data, pagedContent);
 				}
 				items = contents?.continuationItems;
 			}
@@ -2793,7 +2793,7 @@ function yt_loadMoreComments (commentData, pagedContent) {
 		return Promise.resolve(false);
 	return PAGED_REQUEST(commentData.continuation, "next")
 	.then(function (data) {
-		if (pagedContent.aborted) return Promise.resolve();
+		if (pagedContent?.aborted) return Promise.resolve();
 		yt_video.comments.lastPage = data;
 
 		// Extract comments
