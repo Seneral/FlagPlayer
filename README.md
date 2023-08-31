@@ -42,19 +42,21 @@ A simple YouTube Web-App focused on music playback
 - [Official Backend](https://flagplayer-cors.seneral.dev/)
 
 ### Local WebApp:  
+Warning: Since browsers don't treat local files as proper web apps, certain features will not work. Your priority should be on using a local backend.
 1. Download the project on the master branch
 3. Load up /page/index.html
 
 ### Local Backend:
 1. Download the project on the master branch
-1. On Windows: Execute /server/CorsServer.bat
-2. On Linux: Execute /server/CorsServer.sh
+1. On Windows: Execute /server/Setup.bat and /server/CorsServer.bat
+2. On Linux: Execute /server/Setup.sh and /server/CorsServer.sh
 3. Note your local server adress as displayed in the console, usually http://localhost:8080
 4. Open the settings in the WebApp (gear top right)
 5. Enter local server adress into the Cors Server field
 
 ### Recommended for Local Desktop Use:
 Create a script that a) launches & kills your local backend and b) launches the installed FlagPlayer WebApp.
+It will use the official host of the WebApp, so the browser will do automatic requests to "sw.js" to check for updates, but NO traffic will go through public servers. Set-and-forget solution.
 This will create an experience very close to a native desktop app when added to your application launcher.
 Example for linux and chromium (it runs better on Chromium than on Firefox):
 ``` Bash
