@@ -1,28 +1,29 @@
 # FlagPlayer
-A simple YouTube Web-App focussed on music playback
-(aka small project that my subconcious thought up to prevent myself from learning for pesky exams)
+A simple YouTube Web-App focused on music playback
 
-- Free, easy to modify and all important stuff happens client-side
+- Free, easy to modify and client-side
 - No official YouTube API used
 - No third party code used
-- Standard player features (select streams freely, e.g. audio only)
-- Prooven interface including dark and light theme
-- Basic settings
-- Save and cache playlists in local database 
+- Save and cache playlists in local database
+  - Free without looping bugs!
+- Mobile support (install as web app!) - with audio only and background playback
+- Cache individual videos (audio only) for offline playback
 - Watch page including:
 	- Comments and Threads (only on custom local server)
 	- Related videos (excluding mixes and livestreams for now)
-	- Playlists large and small
-- Search (videos only) with filtering by category
-- Channel page including all tabs
+- Search + Channel page
 
 ## Missing standard features
 - Subscriptions / Feeds
 - Subtitles
-- Download Button
 - Proper synchronized DASH playback with MediaSourceExtension
-- Playlist/Channel search
-- Better mobile and touch support (not tested)
+- Search limited to Playlists/Channels
+
+## Known Issues
+- Video Playback, especially high resolutions, is super laggy and quickly goes out of sync. Proper MSE implemenentation is needed, which requires routing all video data over the backend server
+- Wrong aspect of thumbnails for videos with 1. only low resolution thumbnail AND 2. non 16-9 ratio - pretty rare
+- Current video title is original (not translated), while related videos, etc. are all translated
+- Most video titles are translated... (there's hope though)
 
 ## Future aspirations
 - Separate Database Management Site: 
@@ -34,37 +35,50 @@ A simple YouTube Web-App focussed on music playback
 - Next-up queue overriding current playlist
 - Related videos browser - dive into related videos of related videos (could work great with next-up queue) 
 
-## Known Issues
-- Video Playback, especially high resolutions, are super laggy and quickly go out of sync. Proper MSE implemenentation is needed
-- Wrong aspect of thumbnails for videos with 1. only low resolution thumbnail AND 2. non 16-9 ratio - pretty rare
-- Can't open internal links in new tabs (will have to revert back to more standard navigation)
-- Current video title is original (not translated), while related videos, etc. are all translated
-- Most video titles are translated... (there's hope though)
-
 ## How To Use
-Hosts:  
-- No hosts so far
-Local Project:  
-1. Download the project
-2. Load up /page/index.html
-3. Search for videos or enter a playlist id in the search bar
-Advanced Server for comments:  
+
+### Public Hosts:  
+- [Official WebApp](https://flagplayer.seneral.dev)
+- [Official Backend](https://flagplayer-cors.seneral.dev/)
+
+### Local WebApp:  
+1. Download the project on the master branch
+3. Load up /page/index.html
+
+### Local Backend:
+1. Download the project on the master branch
 1. On Windows: Execute /server/CorsServer.bat
 2. On Linux: Execute /server/CorsServer.sh
 3. Note your local server adress as displayed in the console, usually http://localhost:8080
-4. Open the settings in the webpage (gear open right)
+4. Open the settings in the WebApp (gear top right)
 5. Enter local server adress into the Cors Server field
-6. Reload page and enjoy comments
-Note: You need to start it every time OR set it up as a service  
-You can also copy the .bat/.sh and put it on your desktop - just edit it to point to the yt-server.js file  
 
-## Server Requirements
-As any website scraping other website's content, a reverse-proxy needs to be set up so that the CORS policy doesn't block the request. There are a few freely available servers out there, but for actual usage you should NEVER rely on them:  
+### Recommended for Local Desktop Use:
+Create a script that a) launches & kills your local backend and b) launches the installed FlagPlayer WebApp.
+This will create an experience very close to a native desktop app when added to your application launcher.
+Example for linux and chromium (it runs better on Chromium than on Firefox):
+``` Bash
+#!/bin/sh
+
+export HOST=localhost
+export PORT=26060
+node --max-http-header-size=65536 yt-server.js &
+export SERVER_PID=$!
+
+#/usr/bin/chromium --profile-directory=Default --app-id=bfnegiddnbgkelpklhkmpgihhpfgobjm
+flatpak 'run' '--command=/app/bin/chromium' 'com.github.Eloston.UngoogledChromium' '--profile-directory=Default' '--app-id=bfnegiddnbgkelpklhkmpgihhpfgobjm'
+
+kill $SERVER_PID
+```
+
+## About the Backend Server
+As any website scraping other website's content, a reverse-proxy needs to be set up so that the CORS policy doesn't block the request.
+There are a few freely available servers out there, but for actual usage you should NEVER rely on them:  
 1. They're usually slow and not very reliable
 2. They provide the service for testing purposes, NOT constant usage - you might get blocked
-3. Custom local server allows you to see comments
+3. Custom local server allows you to see comments (since these requests need another flag that a website cannot set itself)
 So follow the Instructions above to set up a local server.  
-This is a modified CORS Anywhere server that differs in that it passes certain cookies and modifies the header to look like genuine same-origin requests. DO NOT host this server publicly, there are no safeguards activated to prevent abuse of your network.
+This is a modified CORS Anywhere server that differs in that it passes certain cookies and modifies the header to look like genuine same-origin requests.
 
 ## Motivation
 - YouTube is terribly bloated and loads embarassingly slow
