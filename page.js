@@ -4700,22 +4700,25 @@ function onKeyDown (keyEvent) {
 			ct_beginSeeking();
 			md_updateTime(md_curTime + 5);
 			break;
-		case "Up": case "ArrowUp": 
+		case "Up": case "ArrowUp":
 			md_updateVolume(md_pref.volume + 0.1);
 			ct_savePreferences();
 			I("volumeSlider").parentElement.setAttribute("interacting", "");
 			break
-		case "Down": case "ArrowDown": 
+		case "Down": case "ArrowDown":
 			md_updateVolume(md_pref.volume - 0.1);
 			ct_savePreferences();
 			I("volumeSlider").parentElement.setAttribute("interacting", "");
 			break;
-		case "f": 
+		case "f":
 			onToggleFullscreen();
 			break;
-		case "m": 
+		case "m":
 			onControlMute();
 			I("volumeSlider").parentElement.setAttribute("interacting", "");
+			break;
+		case "/":
+			I("searchField").focus();
 			break;
 		default:
 			if (keyEvent.keyCode >= 48 && keyEvent.keyCode <= 57)
