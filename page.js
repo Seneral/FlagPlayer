@@ -354,6 +354,7 @@ function ct_loadPreferences () {
 	md_pref.dashVideo = G("prefDashVideo") || "72030"; // NONE - BEST - WORST - <Resolution*100+FPS>
 	md_pref.dashAudio = G("prefDashAudio") || "160"; // NONE - BEST - WORST - <Bitrate>
 	md_pref.dashContainer = G("prefDashContainer") || "webm"; // webm - mp4
+	md_pref.vCodec = G("prefCodec") || "vp"; // vp, avc, av01
 	md_pref.muted = G("prefMuted") == "true"? true : false;
 	md_pref.volume = G("prefVolume") != undefined? parseFloat(G("prefVolume")) : 1;
 	// Page Settings
@@ -391,6 +392,7 @@ function ct_savePreferences () {
 		S("prefDashVideo", md_pref.dashVideo);
 		S("prefDashAudio", md_pref.dashAudio);
 		S("prefDashContainer", md_pref.dashContainer);
+		S("prefCodec", md_pref.vCodec);
 	}
 	S("prefMuted", md_pref.muted);
 	S("prefVolume", md_pref.volume);
@@ -700,20 +702,22 @@ function ct_cacheVideo(video) {
 	var videoID = video.videoID;
 	var notID = 'cache-' + videoID;
 	var abort = false;
+	var type = "normal"; // "normal" - normal is better but uses more cors server resources as all cached audio is directed over it
 	ui_setNotification(notID, "Caching " + videoID + "...").notOnClose = function() { abort = true; };
-	db_cacheStream(video, function(bytesReceived, bytesTotal) {
+	db_cacheStream(video, type, function(bytesReceived, bytesTotal) {
+		// Not called if type == opaque
 		if (abort) return false;
-		ui_setNotification(notID, 'Caching ' + videoID + ': ' + ui_shortenBytes(bytesReceived) + '/' + ui_shortenBytes(bytesTotal) + '');
+		ui_setNotification(notID, "Caching " + videoID + ": " + ui_shortenBytes(bytesReceived) + "/" + ui_shortenBytes(bytesTotal));
 		return true;
 	}).then(function(cache) { 
-		var not = ui_setNotification(notID, 'Caching ' + videoID + ': ' + ui_shortenBytes(cache.size) + ' - ' +
-			'<button id="seeCacheButton">View Cache</button>', 3000);
-		not.notContent.children[0].onclick = function () { not.notClose(); ct_navCache(); };
-		video.cache = cache;
+		var not = ui_setNotification(notID, "Caching " + videoID + ": " + (cache.size? ui_shortenBytes(cache.size) : "Done, unknown size") + " - " +
+			'<button>View Cache</button>', 3000);
+		not.notContent.children[0].onclick = function() { not.notClose(); ct_navCache(); };
+		video.mediaCache = cache;
 		// In case current view is cache, update the view
 		db_getCachedVideos().then(ui_setupCache);
 	}).catch(function(e) {
-		if (!abort) ui_setNotification(notID, 'Caching ' + videoID + ': Error: ' + (e? e.message : "unknown"));
+		if (!abort) ui_setNotification(notID, "Caching " + videoID + ": " + (e?.message  || "Unknown Error"));
 	});
 }
 
@@ -1053,7 +1057,10 @@ function ct_mediaError (error) {
 		});
 		ui_setNotification("vd-" + yt_videoID, 'Cache of ' + yt_videoID + ' is invalid, removed entry!', 5000);*/
 		console.error("Cached media file erroneous! Ignoring. ", error);
+		yt_video.mediaCache = undefined;
 		md_resetStreams();
+		md_updateStreams();
+		ui_updateStreamState();
 		ui_setNotification("vd-" + yt_videoID, 'Cache of "' + (yt_video && yt_video.meta? yt_video.meta.title : "") + '"' + yt_videoID + ' seems to be invalid!', 5000);
 		return;
 	} else if (error instanceof PlaybackError && error.code == 4) {
@@ -1474,27 +1481,27 @@ function db_cacheThumbnails(thumbs) {
 			+ (cacheThumbFail > 0? (" - " + cacheThumbFail + " failed") : ""), 3000);
 	});
 }
-function db_currentVideoAsCache() {
-	if (yt_video == undefined)
+function db_videoAsCache(video) {
+	if (video == undefined)
 		return undefined;
 	return {
-		title: yt_video.meta.title, 
-		videoID: yt_video.videoID, 
-		length: yt_video.meta.length, 
-		thumbnailURL: yt_video.meta.thumbnailURL, 
+		title: video.meta.title, 
+		videoID: video.videoID, 
+		length: video.meta.length, 
+		thumbnailURL: video.meta.thumbnailURL, 
 		addedDate: new Date(), 
-		uploadedDate: yt_video.meta.uploadedDate, 
+		uploadedDate: video.meta.uploadedDate, 
 		uploader: {
-			name: yt_video.meta.uploader.name,
-			channelID: yt_video.meta.uploader.channelID,
-			url: yt_video.meta.uploader.url,
+			name: video.meta.uploader.name,
+			channelID: video.meta.uploader.channelID,
+			url: video.meta.uploader.url,
 		}, 
-		views: yt_video.meta.views, 
-		likes: yt_video.meta.likes, 
-		dislikes: yt_video.meta.dislikes, 
-		comments: yt_video.comments.count, // only works on mobile, or when comments are loaded on desktop 
+		views: video.meta.views, 
+		likes: video.meta.likes, 
+		dislikes: video.meta.dislikes, 
+		comments: video.comments.count, // only works on mobile, or when comments are loaded on desktop 
 		tags: "", // Got none of that
-		categoryID: yt_video.meta.category,
+		categoryID: video.meta.category,
 	};
 }
 function db_getStoredVideos () {
@@ -1560,74 +1567,235 @@ function db_getCachedVideos () {
 		});
 	});
 }
-function db_cacheStream (video, progress) {
+function db_cacheStream (video, type, progress) {
 	if (!video.ready) return Promise.reject({ message: "Video not ready!" });
 	if (!("serviceWorker" in navigator) || !sw_current) return Promise.reject({ message: "No Service Worker - reload!"});
 
+	var exCache = video.mediaCache;
+	if (exCache && exCache.quality >= ct_pref.cacheAudioQuality && exCache.status == "complete")
+		return Promise.resolve(exCache); // Existing complete cache of same or equal quality, except for opaque caches (size==0) that might be wrong
+
+	// Select first stream at or below bitrate, or continue existing stream
+	var streamSelection = md_selectableStreams(video, true).dashAudio;
+	var stream = undefined;
+	if (exCache && exCache.quality == ct_pref.cacheAudioQuality)
+		stream = streamSelection.find(s => s.itag == exCache.itag); // Continue caching
+	if (!stream) stream = md_selectStream(streamSelection, ct_pref.cacheAudioQuality, md_daVal);
+	var startByte = 0;
+	//if (exCache?.itag == stream.itag) startByte = exCache.progress;
+	// TODO: Fix continuing cache, doesn't always work
+
 	var cacheID = video.videoID;
-	var stream = md_selectStream(md_selectableStreams(video, true).dashAudio, ct_pref.cacheAudioQuality, md_daVal);
 	var cacheObj = { 
 		url: VIRT_CACHE + cacheID,
 		quality: stream.aBR,
 		itag: stream.itag,
 	};
-	var controller = new AbortController();
 
-	return fetch(ct_pref.corsAPIHost + stream.url, { headers: { "range": "bytes=0-" }, signal: controller.signal })
-	.then(function(response) {
-		if (!response.ok)
-			return Promise.reject(new NetworkError(response));
+	if (exCache)
+		console.log("Found existing cache information of itag " + exCache.itag + ", downloaded " + exCache.progress + "/" + exCache.size);
 
-		cacheObj.size = parseInt(response.headers.get("content-length"));
-		if (progress && !progress(0, cacheObj.size)) {
-			controller.abort();
-			return Promise.reject({ message: "Aborted!" });
-		}
-
-		// Split stream to cache and progress streams
-		var dataStreams = response.body.tee();
-		
-		// Add to cache
-		var cacheWrite = window.caches.open("flagplayer-media")
-		.then(function(cache) {
-			return cache.put(cacheObj.url, new Response(dataStreams[0], {
-				status: 200,
-				headers: {
-					"content-length": response.headers.get("content-length"),
-					"content-type": response.headers.get("content-type"),
-				},
-			}));
-		});
-
-		var progressWatch = new Promise(async function(resolve, reject) {
-			const reader = dataStreams[1].getReader();
-			let bytesReceived = 0;
-			while (true) {
-				const result = await reader.read();
-				if (result.done) return resolve();
-				bytesReceived += result.value.length;
-				if (progress && !progress(bytesReceived, cacheObj.size)) {
-					controller.abort();
-					return reject({});
-				}
-			}
-		});
-
-		return Promise.all([cacheWrite, progressWatch])
-		// Add to database
-		.then(db_access)
-		.then(function() {
-			var dbVideos = db_database.transaction("videos", "readwrite").objectStore("videos");
+	var updateCache = function (mediaCache, status) {
+		return db_access().then(function () {
 			return new Promise (function (resolve, reject) {
-				dbVideos.get(cacheID).onsuccess = function (e) {
-					var cachedVideo = e.target.result || db_currentVideoAsCache();
-					cachedVideo.cache = cacheObj;
-					dbVideos.put(cachedVideo).onsuccess = function () { resolve(cacheObj); };
-					db_requestPersistence();
+				var dbVideos = db_database.transaction("videos", "readwrite").objectStore("videos");
+				var getVidReq = dbVideos.get(cacheID);
+				getVidReq.onsuccess = function (e) {
+					var cachedVideo = e.target.result || db_videoAsCache(video);
+					if (mediaCache.size == 0)
+						mediaCache.status = "opaque";
+					if (mediaCache.progress < mediaCache.size)
+						mediaCache.status = "partial" + (status? " - " + status : "");
+					if (mediaCache.progress == mediaCache.size)
+						mediaCache.status = "complete";
+					cachedVideo.cache = mediaCache;
+					var setVidReq = dbVideos.put(cachedVideo);
+					setVidReq.onsuccess = function () {
+						resolve(mediaCache);
+					};
+					setVidReq.onerror = function (err) {
+						reject({ message: "Database error: " + err });
+					};
+					if (mediaCache.progress == mediaCache.size || mediaCache.progress == 0)
+						db_requestPersistence();
+				};
+				getVidReq.onerror = function (err) {
+					reject({ message: "Database error: " + err });
 				};
 			});
 		})
-	});
+	};
+
+	var downloadController = new AbortController();
+
+	if (type == "opaque") {
+		return fetch(stream.url, { headers: { "range": "bytes=0-" }, mode: "no-cors", signal: downloadController.signal })
+		.then(function (response) {
+			assert(response.type == "opaque");
+			cacheObj.size = undefined;
+			cacheObj.progress = undefined;
+			// Add to cache
+			var cacheWrite = window.caches.open("flagplayer-media")
+			.then(function (cache) {
+				return cache.put(cacheObj.url, response);
+			})
+			.catch(() => {
+				downloadController.abort();
+				throw "download"; // Error here is equal to aborted
+			});
+			// TODO: Finish progress watch to be able to abort
+			var progressWatch = new Promise(function (resolve, reject) {
+				while (true) {
+					if (download.status != "pending") return resolve();
+					if (progress && !progress(cacheObj.progress, cacheObj.size)) {
+						downloadController.abort();
+						return reject("aborted");
+					}
+				}
+			});
+			return Promise.all([cacheWrite, progressWatch])
+			.catch(function (status) {
+				if (status == "download")
+					throw { message: "Opaque download/cache failed!" };
+				if (status == "aborted")
+					throw { message: "Aborted!" };
+				// Nothing else should happen
+			})
+			.then(() => updateCache(cacheObj));
+		});
+	} else {
+
+		var startStream;
+		if (startByte) {
+			console.log("Decided to continue downloading from byte " + startByte + "/" + exCache.size);	
+			startStream = fetch(exCache.url)
+			.then(function (response) {
+				if (response.type == "opaque")
+					throw "Conflicting information, cache stream is opaque";
+				return response.body;
+			});
+		}
+		else
+		{ // Dummy stream that can be read from once
+			startStream = new Promise (function (resolve) {
+				resolve(new ReadableStream({
+					start(controller) {
+						controller.close();
+					}
+				}));
+			});
+		}
+		
+		var downloadStream = fetch(ct_pref.corsAPIHost + stream.url, 
+			{ headers: { "range": "bytes=" + startByte + "-" }, signal: downloadController.signal })
+		.then(function (response) {
+			if (response.type == "opaque")
+				return Promise.reject({ message: "Conflicting information, downloaded stream is opaque" });
+			if (!response.ok)
+				return Promise.reject(new NetworkError(response));
+	
+			cacheObj.progress = startByte;
+			cacheObj.size = startByte + parseInt(response.headers.get("content-length"));
+			cacheObj.contentType = response.headers.get("content-type");
+			if (progress && !progress(cacheObj.progress, cacheObj.size)) {
+				downloadController.abort();
+				return Promise.reject({ message: "Aborted!" });
+			}
+	
+			// Split stream to cache and progress streams
+			return response.body;
+		});
+
+		return Promise.all([startStream, downloadStream])
+		.then(function (streams) {
+			return new ReadableStream({
+				start(controller) {
+					const reader = streams[0].getReader();
+					return pumpCached();
+					function pumpCached () {
+						return reader.read().then(({ done, value }) => {
+							if (done) return pumpDownload();
+							controller.enqueue(value);
+							return pumpCached();
+						});
+					}
+					function pumpDownload () {
+						// Split stream to cache and progress streams
+						var dataStreams = streams[1].tee();
+						
+						// Add to cache
+						var downloader = new Promise(function (resolve, reject) {
+							const downloadReader = dataStreams[0].getReader();
+							return pump();
+							function pump() {
+								return downloadReader.read().then(({ done, value }) => {
+									if (done) return resolve();
+									controller.enqueue(value);
+									return pump();
+								});
+							}
+						}).catch((e) => {
+							console.error("Downloader error: ", e);
+							downloadController.abort();
+							throw e;
+						});
+
+						var progressWatch = new Promise(function (resolve, reject) {
+							const reader = dataStreams[1].getReader();
+							return pump();
+							function pump() {
+								return reader.read().then(({ done, value }) => {
+									if (done) return resolve("success");
+									cacheObj.progress += value.length;
+									updateCache(cacheObj, "downloading")
+									.catch(function () {
+										console.error("Couldn't update cache!");
+									});
+									if (progress) {
+										var status = progress(cacheObj.progress, cacheObj.size);
+										if (!status) {
+											downloadController.abort();
+											return reject("aborted");
+										}
+									}
+									return pump();
+								});
+							}
+						});
+				
+						return Promise.all([downloader, progressWatch])
+						.then(res => res[1]) // Only care about output from progressWatch
+						.catch(function (status) {
+							if (status == "aborted")
+								throw { message: "Aborted!" };
+							return status; // cache
+						})
+						.then(function (status) {
+							updateCache(cacheObj, status)
+							.then(() => controller.close());
+						});
+					}
+				},
+			});
+		})
+		.then(function (cacheStream) {
+			return window.caches.open("flagplayer-media")
+			.then(function (cache) {
+				return cache.put(cacheObj.url, new Response(cacheStream, {
+					status: 200,
+					headers: {
+						"content-length": cacheObj.size,
+						"content-type": cacheObj.contentType,
+					},
+				}))
+				.then(() => cacheObj);
+			});
+		})
+		.catch((e) => {
+			console.error ("Complete cache error: ", e);
+			throw e;
+		});
+	}
 }
 function db_deleteCachedStream (cacheID) {
 	return window.caches.open("flagplayer-media")
@@ -1883,7 +2051,8 @@ function yt_parseNum (numText) {
 }
 function yt_selectThumbnail (thumbnails) {
 	if (!Array.isArray(thumbnails))
-	thumbnails = thumbnails.thumbnails;
+	thumbnails = thumbnails?.thumbnails;
+	if (!thumbnails) return undefined;
 	var url = (thumbnails || []).sort(function(t1, t2) { return t1.height > t2.height? -1 : 1 })[0]?.url || "";
 	if (url.startsWith("//"))
 		return "https:" + url;
@@ -2047,7 +2216,7 @@ function yt_extractPlaylistData(playlist, initialData) {
 	playlist.count = yt_parseNum(yt_parseLabel(prim?.stats.find(s => yt_parseLabel(s).includes("videos"))));
 	playlist.description = yt_parseText(yt_parseLabel(prim?.descriptionText || prim?.description));
 	playlist.thumbnailURL = prim?.thumbnailRenderer? 
-		yt_selectThumbnail(prim?.thumbnailRenderer.playlistVideoThumbnailRenderer.thumbnail)
+		yt_selectThumbnail(prim.thumbnailRenderer.playlistVideoThumbnailRenderer?.thumbnail || prim.thumbnailRenderer.playlistCustomThumbnailRenderer?.thumbnail)
 		: HOST_YT_IMG + playlist.videos[0].videoID + '/default.jpg';
 }
 function yt_parsePlaylistVideos(itemList) {
@@ -2164,7 +2333,7 @@ function yt_parseSearchResults(itemList) {
 				count: yt_parseNum(yt_parseLabel(p.videoCountText)),
 //				views: yt_parseNum(yt_parseLabel(p.viewCountText)),
 //				updatedTimeAgoText: yt_parseLabel(p.publishedTimeText),
-				thumbnailURL: yt_selectThumbnail(p.thumbnail || p.thumbnailRenderer.playlistVideoThumbnailRenderer?.thumbnail || p.thumbnailRenderer.playlistCustomThumbnailRenderer?.thumbnail),
+				thumbnailURL: yt_selectThumbnail(p.thumbnail || p.thumbnailRenderer?.playlistVideoThumbnailRenderer?.thumbnail || p.thumbnailRenderer?.playlistCustomThumbnailRenderer?.thumbnail),
 				author: {
 					name: yt_parseLabel(p.ownerText || p.shortBylineText),
 					channelID: u?.browseEndpoint?.browseId,
@@ -2212,8 +2381,9 @@ function yt_extractChannelMetadata(initialData) {
 		meta.bannerImg = header.banner? yt_selectThumbnail(header.banner) : undefined;
 		meta.url = header.navigationEndpoint.browseEndpoint.canonicalBaseUrl;
 		meta.subscribers = yt_parseNum(yt_parseLabel(header.subscriberCountText));
-		var chLinks = header.headerLinks? (header.headerLinks.channelHeaderLinksRenderer.primaryLinks || []).concat(header.headerLinks.channelHeaderLinksRenderer.secondaryLinks || []) : [];
-		meta.links = chLinks.map(l => { return { title: l.title.simpleText, icon: l.icon? yt_selectThumbnail(l.icon) : undefined, link: l.navigationEndpoint.urlEndpoint.url }; });
+		// TODO: Broken since now hidden behind an endpoint
+		var chLinks = (header.headerLinks?.channelHeaderLinksRenderer?.primaryLinks || []).concat(header.headerLinks?.channelHeaderLinksRenderer?.secondaryLinks || []);
+		meta.links = chLinks.map(l => { return { title: yt_parseLabel(l.title), icon: yt_selectThumbnail(l.icon), link: l.navigationEndpoint?.urlEndpoint?.url }; });
 	} catch (e) { console.error("Failed to extract channel metadata!", e, initialData); }
 
 	try { // Extract secondary metadata
@@ -2831,12 +3001,10 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 	if (contents.length > 0) {
 		try { // Extract comments
 			contents.forEach(function (c) {
-				var thread, comm;
-				if (c.commentThreadRenderer) {
-					thread = c.commentThreadRenderer;
-					comm = thread.comment.commentRenderer;
-				} else comm = c.commentRenderer;
-				if (!comm) return; // ContinuationItemRenderer
+				var thread = c.commentThreadRenderer;
+				if (thread?.commentViewModel) return; // loggingDirectives.enableDisplayloggerExperiment=true wtf?
+				var comm = thread?.comment?.commentRenderer || c.commentRenderer;
+				if (!comm) return; // probably ContinuationItemRenderer, expecting one at the end
 
 				try { // Only exact measurement on desktop
 					var likeCount = yt_parseNum(comm.actionButtons.commentActionButtonsRenderer.likeButton.toggleButtonRenderer.accessibilityData.accessibilityData.label);
@@ -3013,14 +3181,15 @@ function yt_decodeStreams (config) {
 			// Verify itag
 			var itag = s.itag;
 			if (itag == undefined) continue; // Yes these pop up recently
-			else if (ITAGS[itag] == undefined) {
-				console.error("Unknown stream ITag '" + itag + "'");
+			var itagTemplate = ITAGS[itag];
+			if (!itagTemplate) {
+				console.warn("Unknown stream ITag '" + itag + "'");
 				continue;
 			}
 
 			// ITag Data
-			stream.isLive = ITAGS[itag].hls || stream.url.includes("&live=1");
-			stream.isStereo = ITAGS[itag].ss3D || false;
+			stream.isLive = itagTemplate?.hls || stream.url.includes("&live=1");
+			stream.isStereo = itagTemplate?.ss3D || false;
 
 			// Format
 			if (s.mimeType || s.type) {
@@ -3032,9 +3201,10 @@ function yt_decodeStreams (config) {
 				stream.aCodec = mime[1] == "audio"? stream.codecs[0] : stream.codecs[1];
 			}
 			else {
-				stream.container = ITAGS[itag].ext;
-				stream.vCodec = ITAGS[itag].vCodec;
-				stream.aCodec = ITAGS[itag].aCodec;
+				if (!itagTemplate) continue;
+				stream.container = itagTemplate.ext;
+				stream.vCodec = itagTemplate.vCodec;
+				stream.aCodec = itagTemplate.aCodec;
 				stream.codecs = [];
 				if (stream.vCodec) stream.codecs.push (stream.vCodec);
 				if (stream.aCodec) stream.codecs.push (stream.aCodec);
@@ -3071,19 +3241,21 @@ function yt_decodeStreams (config) {
 					stream.vResY = s.height;
 				}
 				else {
-					stream.vResX = ITAGS[itag].x;
-					stream.vResY = ITAGS[itag].y;
+					if (!itagTemplate) continue;
+					stream.vResX = itagTemplate.x;
+					stream.vResY = itagTemplate.y;
 				}
 				stream.proj = s.projectionType;
 				if (s.fps) stream.vFPS = parseInt(s.fps);
-				else stream.vFPS = ITAGS[itag].fps || 30;
+				else stream.vFPS = itagTemplate?.fps || 30;
 			}
 
 			// Audio
 			if (stream.hasAudio) {
+				if (!itagTemplate) continue;
 				stream.aChannels = parseInt(s.audio_channels || s.audioChannels);
 				stream.aSR = parseInt(s.audio_sample_rate || s.audioSampleRate);
-				stream.aBR = ITAGS[itag].aBR;
+				stream.aBR = itagTemplate.aBR;
 			}
 
 			// Apply
@@ -3190,14 +3362,11 @@ function ui_updateStreamState (selectedStreams) {
 	//I("legacyStreamToggle").checked = !md_pref.dash;
 	setDisplay("legacyStreamGroup", md_pref.dash? "none" : "");
 	setDisplay("dashStreamGroup", md_pref.dash? "" : "none");
-	I("select_dashContainer").value = md_pref.dashContainer;
+	I("select_codec").value = md_pref.vCodec;
 	if (selectedStreams) {
-		I("select_dashVideo").value = !selectedStreams.dashAudio? "NONE" : 
-			(isNaN(parseInt(md_pref.dashVideo))? md_pref.dashVideo : selectedStreams.dashVideo.vResY*100+selectedStreams.dashVideo.vFPS);
-		I("select_dashAudio").value = !selectedStreams.dashAudio? "NONE" : 
-			(isNaN(parseInt(md_pref.dashAudio))? md_pref.dashAudio: selectedStreams.dashAudio.aBR);
-		I("select_legacy").value = !selectedStreams.dashAudio? "NONE" : 
-			(isNaN(parseInt(md_pref.legacyVideo))? md_pref.legacyVideo : selectedStreams.legacyVideo.vResY);
+		I("select_dashVideo").value = selectedStreams.dashVideo? md_dvVal(selectedStreams.dashVideo) : "NONE";
+		I("select_dashAudio").value = selectedStreams.dashAudio? md_daVal(selectedStreams.dashAudio) : "NONE";
+		I("select_legacy").value = selectedStreams.dashAudio? md_dvVal(selectedStreams.legacyVideo) : "NONE";
 	} else if (yt_video && yt_video.ready) {
 		// Triggered by changes to selectableStreams (streams were deemed unavailable)
 		var dropdown = I("select_dashVideo");
@@ -3218,7 +3387,7 @@ function ui_updatePlayerState () {
 	setDisplay("endedIndicator", md_state == State.Ended? "block" : "none");
 	setDisplay("nextLoadIndicator", "none");
 	setDisplay("startPlayIndicator", md_state == State.PreStart? "block" : "none");
-	setDisplay("videoPoster", md_state == State.Started && md_sources.video? "none" : "block");
+	setDisplay("videoPoster", md_state == State.Started && md_sources?.video? "none" : "block");
 }
 function ui_updateFullscreenState () {
 	I("fullscreenButton").setAttribute("state", ct_temp.fullscreen? "on" : "off");
@@ -3464,13 +3633,13 @@ function ui_setStreams () {
 	// Fill dropdowns with available values
 	var selectableStreams = md_selectableStreams(yt_video);
 	fillDropdown(I("select_dashVideo"), selectableStreams.dashVideo.map(function(s) { 
-		return { value: s.vResY*100+s.vFPS, label: s.vResY + "p" + (s.vFPS != 30? "" + s.vFPS : "") }; 
+		return { value: md_dvVal(s), label: s.vResY + "p" + (s.vFPS != 30? "" + s.vFPS : "") }; 
 	}));
 	fillDropdown(I("select_dashAudio"), selectableStreams.dashAudio.map(function(s) { 
-		return { value: s.aBR, label: s.aBR + "kbps" }; 
+		return { value: md_daVal(s), label: s.aBR + "kbps" }; 
 	}));
 	fillDropdown(I("select_legacy"), selectableStreams.legacyVideo.map(function(s) { 
-		return { value: s.vResY, label: s.vResY + "p / " + s.aBR + "kbps" }; 
+		return { value: md_dvVal(s), label: s.vResY + "p / " + s.aBR + "kbps" }; 
 	}));
 }
 function ui_resetStreams () {
@@ -3706,10 +3875,13 @@ function ui_setChannelMetadata () {
 	if (yt_channel.meta.bannerImg) {
 		I("chBannerImg").src = yt_channel.meta.bannerImg;
 		sec_banner.style.display = "block";
-		var linkContainer = I("chLinkBar");
-		for(var i = 0; i < yt_channel.meta.links.length; i++) {
-			var link = yt_channel.meta.links[i];
-			ht_appendChannelLinkElement(linkContainer, link.link, link.icon, link.title);
+		if (yt_channel.meta.links)
+		{
+			var linkContainer = I("chLinkBar");
+			for(var i = 0; i < yt_channel.meta.links.length; i++) {
+				var link = yt_channel.meta.links[i];
+				ht_appendChannelLinkElement(linkContainer, link.link, link.icon, link.title);
+			}
 		}
 	} else I("chBannerImg").removeAttribute("src");
 
@@ -4311,7 +4483,7 @@ function ui_setupEventHandlers () {
 	I("plClose").onclick = ct_resetPlaylist;
 	// Options Panel
 	I("select_legacy").onchange = function () { onOptionsChange("ST"); };
-	I("select_dashContainer").onchange = function () { onOptionsChange("ST"); };
+	I("select_codec").onchange = function () { onOptionsChange("ST"); };
 	I("select_dashVideo").onchange = function () { onOptionsChange("ST"); };
 	I("select_dashAudio").onchange = function () { onOptionsChange("ST"); };
 	I("opt_loop").onchange = function () { onOptionsChange("LP"); };
@@ -4407,10 +4579,11 @@ function onSettingsChange (hint) {
 	switch (hint) {
 		case "CH":
 			ct_pref.corsAPIHost = I("st_corsHost").value;
-			if (!ct_pref.corsAPIHost.endsWith('/')) {
+			if (!ct_pref.corsAPIHost)
+				ct_pref.corsAPIHost = HOST_CORS;
+			if (!ct_pref.corsAPIHost.endsWith('/'))
 				ct_pref.corsAPIHost += '/';
-				I("st_corsHost").value += '/';
-			}
+			I("st_corsHost").value = ct_pref.corsAPIHost;
 			break;
 		case "FV":
 			ct_pref.filterHideCompletely = I("st_filter_hide").checked;
@@ -4452,7 +4625,7 @@ function onOptionsChange (hint) {
 			md_pref.legacyVideo = I("select_legacy").value;
 			md_pref.dashVideo = I("select_dashVideo").value;
 			md_pref.dashAudio = I("select_dashAudio").value;
-			md_pref.dashContainer = I("select_dashContainer").value;
+			md_pref.vCodec = I("select_codec").value;
 			md_updateStreams();
 		case "LP":
 			ct_temp.loop = I("opt_loop").checked;
@@ -4692,7 +4865,7 @@ function onKeyDown (keyEvent) {
 		case " ": case "k":
 			ct_mediaPlayPause(!md_paused, true);
 			break;
-		case "Left": case "ArrowLeft": case "j": 
+		case "Left": case "ArrowLeft": case "j":
 			ct_beginSeeking();
 			md_updateTime(md_curTime - 5);
 			break;
@@ -4791,8 +4964,8 @@ function onMediaTimeUpdate () {
 	// Prefer audio - it will advance when not viewed, video not
 	// And syncing video to audio is less noticeable than the other way around
 	if (md_state == State.Started && !md_flags.seeking) {
-		if (md_sources.audio) md_curTime = audioMedia.currentTime;
-		else if (md_sources.video) md_curTime = videoMedia.currentTime;
+		if (md_sources?.audio) md_curTime = audioMedia.currentTime;
+		else if (md_sources?.video) md_curTime = videoMedia.currentTime;
 		else md_curTime = 0;
 		ui_updateTimelineProgress();
 	}
@@ -4813,7 +4986,7 @@ function onMediaTimeUpdate () {
 /* -------------------- */
 
 // Assign value to streams for sorting: DashVideo DashAudio LegacyVideo
-function md_dvVal (s) { return (s.vResY * 100 + s.vFPS) * 2 + (s.container == md_pref.dashContainer? 1 : 0); }
+function md_dvVal (s) { return s.vResY * 100 + s.vFPS; }
 function md_daVal (s) { return s.aBR; }
 function md_lvVal (s) { return s.vResY; }
 
@@ -4832,20 +5005,42 @@ function md_selectableStreams (video, includeUnavailable = false) {
 		.sort((s1, s2) =>  md_daVal(s1) > md_daVal(s2)? -1 : 1);
 	return streams;
 }
-function md_selectStream (s, pref, value, sec) { // SECondary selector, f.E. container
+function md_selectStream (s, pref, value, selectPreferred) { // SECondary selector, f.E. container
 	if (pref == "NONE" || s.length == 0) return undefined;
 	if (s.length == 1) return s[0];
-	if (pref == "BEST") return s[0];
-	if (pref == "WORST") // Still select the preferred container
-		return sec && value(s[s.length-2]) == value(s[s.length-1])+1? s[s.length-2] : s[s.length-1];
-	return s.find(s1 => value(s1) <= (sec? parseInt(pref)*2+1 : parseInt(pref))) || s[s.length-1];
+	// Pick desired target quality
+	var target;
+	if (pref == "BEST") target = value(s[0]);
+	else if (pref == "WORST") target = value(s[s.length-1]);
+	else { // Find best quality equal or lower than preferred
+		target = parseInt(pref) || value(s[s.length-1]);
+		target = s.reduce(function (t, p) {
+			var val = value(p);
+			return val <= target && val > t? val : t;
+		}, 0);
+	}
+	// Select best matching
+	var match = s.filter(v => value(v) == target);
+	if (match.length == 1)
+		return match[0];
+	if (match.length > 1)
+		return selectPreferred? selectPreferred(match) : match[0];
+	console.error("Selected target quality " + target + " had no matching streams after all!");
+	return undefined;
 }
 function md_selectStreams (video) {
 	if (!video || !video.ready) return undefined;
 	// Return the selected stream in each category according to preferences
 	var allStreams = md_selectableStreams(video);
 	var streams = {};
-	streams.dashVideo = md_selectStream(allStreams.dashVideo, md_pref.dashVideo, md_dvVal, true);
+	// From selection, prefer matching codec
+	var selectPreferred = function(streams)
+	{
+		var best = streams.find(s => s.vCodec.includes(md_pref.vCodec));
+		if (!best) best = streams[0];
+		return best;
+	}
+	streams.dashVideo = md_selectStream(allStreams.dashVideo, md_pref.dashVideo, md_dvVal, selectPreferred);
 	streams.dashAudio = md_selectStream(allStreams.dashAudio, md_pref.dashAudio, md_daVal);
 	streams.legacyVideo = md_selectStream(allStreams.legacyVideo, md_pref.legacyVideo, md_lvVal);
 	console.log("MD: Selected Streams:", streams);
@@ -4866,7 +5061,8 @@ function md_updateStreams ()  {
 	md_sources = {};
 	if (md_pref.dash) {
 		md_sources.video = selectedStreams.dashVideo? selectedStreams.dashVideo.url : '';
-		md_sources.audio = yt_video.mediaCache && (ct_pref.cacheForceUse || !ct_online)? yt_video.mediaCache.url 
+		md_sources.audio = yt_video.mediaCache && yt_video.mediaCache.status == "complete" && 
+			(ct_pref.cacheForceUse || !ct_online)? yt_video.mediaCache.url 
 			: (selectedStreams.dashAudio? selectedStreams.dashAudio.url
 					: (yt_video.mediaCache? yt_video.mediaCache.url : ''));
 	} else {
@@ -5458,11 +5654,11 @@ var ITAGS = {
 135: { x:  854, y:  480, ext:  "mp4", vCodec: "h264" },
 136: { x: 1280, y:  720, ext:  "mp4", vCodec: "h264" },
 137: { x: 1920, y: 1080, ext:  "mp4", vCodec: "h264" },
-138: { x: 4096, y: 2160, ext:  "mp4", vCodec: "h264" },
+138: { x: 3840, y: 2160, ext:  "mp4", vCodec: "h264" },
 160: { x:  256, y:  144, ext:  "mp4", vCodec: "h264" },
 212: { x:  854, y:  480, ext:  "mp4", vCodec: "h264" },
 264: { x: 2560, y: 1440, ext:  "mp4", vCodec: "h264" },
-266: { x: 4096, y: 2160, ext:  "mp4", vCodec: "h264" },
+266: { x: 3840, y: 2160, ext:  "mp4", vCodec: "h264" },
 167: { x:  640, y:  360, ext: "webm", vCodec:  "vp8" },
 168: { x:  854, y:  480, ext: "webm", vCodec:  "vp8" },
 169: { x: 1280, y:  720, ext: "webm", vCodec:  "vp8" },
@@ -5477,7 +5673,7 @@ var ITAGS = {
 247: { x: 1280, y:  720, ext: "webm", vCodec:  "vp9" },
 248: { x: 1920, y: 1080, ext: "webm", vCodec:  "vp9" },
 271: { x: 2560, y: 1440, ext: "webm", vCodec:  "vp9" },
-272: { x: 4096, y: 2160, ext: "webm", vCodec:  "vp9" }, // 3840x2160 (e.g. RtoitU2A-3E) or 7680x4320 (sLprVF6d7Ug)
+272: { x: 3840, y: 2160, ext: "webm", vCodec:  "vp9" }, // 3840x2160 (e.g. RtoitU2A-3E) or 7680x4320 (sLprVF6d7Ug)
 278: { x:  256, y:  144, ext: "webm", vCodec:  "vp9" },
 // 60fps
 298: { x: 1280, y:  720, ext:  "mp4", vCodec: "h264", fps: 60 },
@@ -5485,8 +5681,8 @@ var ITAGS = {
 302: { x: 1280, y:  720, ext: "webm", vCodec:  "vp9", fps: 60 },
 303: { x: 1920, y: 1080, ext: "webm", vCodec:  "vp9", fps: 60 },
 308: { x: 2560, y: 1440, ext: "webm", vCodec:  "vp9", fps: 60 },
-313: { x: 4096, y: 2160, ext: "webm", vCodec:  "vp9" },
-315: { x: 4096, y: 2160, ext: "webm", vCodec:  "vp9", fps: 60 },
+313: { x: 3840, y: 2160, ext: "webm", vCodec:  "vp9" },
+315: { x: 3840, y: 2160, ext: "webm", vCodec:  "vp9", fps: 60 },
 // 60fps + HDR
 330: { x:  256, y:  144, hdr: true, fps: 60 },
 331: { x:  426, y:  240, hdr: true, fps: 60 },
@@ -5495,7 +5691,18 @@ var ITAGS = {
 334: { x: 1280, y:  720, hdr: true, fps: 60 },
 335: { x: 1920, y: 1080, hdr: true, fps: 60 },
 336: { x: 2560, y: 1440, hdr: true, fps: 60 },
-337: { x: 4096, y: 2160, hdr: true, fps: 60 },
+337: { x: 3840, y: 2160, hdr: true, fps: 60 },
+// AV1
+394: { x:  256, y:  144, ext:  "mp4", vCodec: "av01.0.05M.08" },
+395: { x:  426, y:  240, ext:  "mp4", vCodec: "av01.0.05M.08" },
+396: { x:  640, y:  360, ext:  "mp4", vCodec: "av01.0.05M.08" },
+397: { x:  854, y:  480, ext:  "mp4", vCodec: "av01.0.05M.08" },
+398: { x: 1280, y:  720, ext:  "mp4", vCodec: "av01.0.05M.08" },
+399: { x: 1920, y: 1080, ext:  "mp4", vCodec: "av01.0.05M.08" },
+398: { x: 1280, y:  720, ext:  "mp4", vCodec: "av01.0.05M.08", fps: 60 },
+399: { x: 1920, y: 1080, ext:  "mp4", vCodec: "av01.0.05M.08", fps: 60 },
+400: { x: 2560, y: 1440, ext:  "mp4", vCodec: "av01.0.12M.08" },
+401: { x: 3840, y: 2160, ext:  "mp4", vCodec: "av01.0.12M.08" },
 
 // DASH Audio
 139: { ext:  "m4a", aCodec:    "aac", aBR:  48 },
@@ -5512,13 +5719,6 @@ var ITAGS = {
 325: { ext:  "m4a", aCodec:   "dtse" },
 328: { ext:  "m4a", aCodec:   "ec-3" },
 
-// Curious unknown formats
-394: { x:  256,  y:  144, vCodec: "av01.0.05M.08" },
-395: { x:  426,  y:  240, vCodec: "av01.0.05M.08" },
-396: { x:  640,  y:  360, vCodec: "av01.0.05M.08" },
-397: { x:  854,  y:  480, vCodec: "av01.0.05M.08" },
-398: { x: 1280,  y:  720, vCodec: "av01.0.05M.08" },
-399: { x: 1920,  y: 1080, vCodec: "av01.0.05M.08" },
 }
 
 var CATEGORIES = {
