@@ -2066,7 +2066,7 @@ function yt_parseDateText (dateText) {
 	if (euMatch) return new Date(parseInt(euMatch[3]), parseInt(euMatch[2])-1, parseInt(euMatch[1]));
 }
 function yt_parseLabel (label) {
-	return label?.runs?.reduce((t, r) => t += r.text, "") || label?.simpleText || label?.accessibility?.accessibilityData.label || "";
+	return label?.runs?.reduce((t, r) => t += r.text, "") || label?.simpleText || label?.accessibility?.accessibilityData.label || label || "";
 	// Used to prefer accessibility data since numbers were more detailed, but now, some accessibility texts are longer (e.g. title by uploader instead of title)
 }
 function yt_parseText (text) {
@@ -2998,53 +2998,106 @@ function yt_extractVideoCommentObject (commentData, comments, response) {
 		} catch (e) { ct_mediaError(new ParseError(132, "Failed to extract comment header: '" + e.message + "'!", true)); }
 	} // Only in first main request, never reply requests
 
+	// New comment response type, indirecting the actual comment data
+	var commentDB = response.frameworkUpdates?.entityBatchUpdate?.mutations;
+	var parseNewComment = function(c) {
+		var thread = c.commentThreadRenderer;
+		var commView = thread?.commentViewModel?.commentViewModel || c.commentViewModel;
+		var commentKey = commView?.commentKey;
+		var commentStore = commentDB.find(c => c.entityKey == commentKey);
+		var comm = commentStore?.payload?.commentEntityPayload;
+		if (!comm || !comm.properties) return null;
+
+		var comment = {
+			id: comm.properties.commentId,
+			text: comm.properties.content?.content || "Parse Error",
+			likes: yt_parseNum(comm.toolbar?.likeCountNotliked), // Simplified only (e.g. 2k)
+			publishedTimeAgoText: yt_parseLabel(comm.properties.publishedTime),
+		};
+		comment.author = { // If no authorText, YT failed to get author internally (+ default thumbnail) - looking comment up by ID retrieves author correctly
+			name: comm.author?.displayName || "[UNKNOWN AUTHOR]",
+			channelID: comm.author?.channelId,
+			url: comm.author?.channelCommand?.innertubeCommand?.browseEndpoint?.canonicalBaseUrl,
+			profileImg: comm.author?.avatarThumbnailUrl,
+			isUploader: comm.author?.isCreator,
+		};
+		if (thread) { // Main, first stage comment
+			comment.replyData = { 
+				count: comm.toolbar.replyCount || 0,
+				continuation: undefined,
+				replies: comm.toolbar.replyCount? [] : undefined,
+			};
+			if (thread.replies?.commentRepliesRenderer) {
+				var cont = thread.replies.commentRepliesRenderer.contents.extract(c => c.continuationItemRenderer);
+				if (cont) {
+					comment.replyData.continuation = {
+						conToken: cont.continuationEndpoint.continuationCommand.token,
+						itctToken: cont.continuationEndpoint.clickTrackingParams
+					};
+				}
+			}
+		}
+		return comment;
+	};
+
+	var parseOldComment = function(c) {
+		var thread = c.commentThreadRenderer;
+		var comm = thread?.comment?.commentRenderer || c.commentRenderer;
+		if (!comm) return null; // probably ContinuationItemRenderer, expecting one at the end
+
+		// Only exact measurement on desktop
+		var likeCount = yt_parseNum(comm.actionButtons?.commentActionButtonsRenderer?.likeButton?.toggleButtonRenderer?.accessibilityData?.accessibilityData?.label);
+		if (!likeCount) // Simplified only (e.g. 2k)
+			likeCount = yt_parseNum(yt_parseLabel(comm.voteCount)) || "Unknown Likes";
+
+		var comment = {
+			id: comm.commentId,
+			text: comm.contentText.runs? yt_parseFormattedRuns(comm.contentText.runs) : comm.contentText.simpleText,
+			likes: likeCount,
+			publishedTimeAgoText: yt_parseLabel(comm.publishedTimeText),
+		};
+		comment.author = { // If no authorText, YT failed to get author internally (+ default thumbnail) - looking comment up by ID retrieves author correctly
+			name: yt_parseLabel(comm.authorText) || "[UNKNOWN AUTHOR]",
+			channelID: comm.authorEndpoint.browseEndpoint.browseId,
+			url: comm.authorEndpoint.browseEndpoint.canonicalBaseUrl,
+			userID: comm.authorEndpoint.browseEndpoint.canonicalBaseUrl.startsWith("/user/")? comm.authorEndpoint.browseEndpoint.canonicalBaseUrl.substring(6) : undefined,
+			profileImg: yt_selectThumbnail(comm.authorThumbnail),
+			isUploader: comm.authorIsChannelOwner,
+		};
+		if (thread) { // Main, first stage comment
+			comment.replyData = { 
+				count: comm.replyCount? comm.replyCount : 0,
+				continuation: undefined,
+				replies: comm.replyCount? [] : undefined,
+			};
+			if (thread.replies && thread.replies.commentRepliesRenderer) {
+				var cont = thread.replies.commentRepliesRenderer.contents.extract(c => c.continuationItemRenderer);
+				if (cont) {
+					comment.replyData.continuation = {
+						conToken: cont.continuationEndpoint.continuationCommand.token,
+						itctToken: cont.continuationEndpoint.clickTrackingParams
+					};
+				}
+			}
+		}
+		return comment;
+	};
+
 	if (contents.length > 0) {
 		try { // Extract comments
 			contents.forEach(function (c) {
-				var thread = c.commentThreadRenderer;
-				if (thread?.commentViewModel) return; // loggingDirectives.enableDisplayloggerExperiment=true wtf?
-				var comm = thread?.comment?.commentRenderer || c.commentRenderer;
-				if (!comm) return; // probably ContinuationItemRenderer, expecting one at the end
+				var comment;
+				if (c.commentThreadRenderer?.commentViewModel?.commentViewModel || c.commentViewModel) 
+				{ // New style of comment
+					comment = parseNewComment(c);
+				}
+				else if (c.commentThreadRenderer?.comment?.commentRenderer || c.commentRenderer)
+				{ // Old style of comment
+					comment = parseOldComment(c);
+				}
+				if (comment)
+					comments.push(comment);
 
-				try { // Only exact measurement on desktop
-					var likeCount = yt_parseNum(comm.actionButtons.commentActionButtonsRenderer.likeButton.toggleButtonRenderer.accessibilityData.accessibilityData.label);
-				} catch(e) {}
-				if (!likeCount) {
-					try { // Simplified only (e.g. 2k)
-						var likeCount = yt_parseNum(yt_parseLabel(comm.voteCount));
-					} catch(e) {}
-				}
-				var comment = {
-					id: comm.commentId,
-					text: comm.contentText.runs? yt_parseFormattedRuns(comm.contentText.runs) : comm.contentText.simpleText,
-					likes: likeCount,
-					publishedTimeAgoText: yt_parseLabel(comm.publishedTimeText),
-				};
-				comment.author = { // If no authorText, YT failed to get author internally (+ default thumbnail) - looking comment up by ID retrieves author correctly
-					name: yt_parseLabel(comm.authorText) || "[UNKNOWN AUTHOR]",
-					channelID: comm.authorEndpoint.browseEndpoint.browseId,
-					url: comm.authorEndpoint.browseEndpoint.canonicalBaseUrl,
-					userID: comm.authorEndpoint.browseEndpoint.canonicalBaseUrl.startsWith("/user/")? comm.authorEndpoint.browseEndpoint.canonicalBaseUrl.substring(6) : undefined,
-					profileImg: yt_selectThumbnail(comm.authorThumbnail),
-					isUploader: comm.authorIsChannelOwner,
-				};
-				if (thread) { // Main, first stage comment
-					comment.replyData = { 
-						count: comm.replyCount? comm.replyCount : 0,
-						continuation: undefined,
-						replies: comm.replyCount? [] : undefined,
-					};
-					if (thread.replies && thread.replies.commentRepliesRenderer) {
-						var cont = thread.replies.commentRepliesRenderer.contents.extract(c => c.continuationItemRenderer);
-						if (cont) {
-							comment.replyData.continuation = {
-								conToken: cont.continuationEndpoint.continuationCommand.token,
-								itctToken: cont.continuationEndpoint.clickTrackingParams
-							};
-						}
-					}
-				}
-				comments.push(comment);
 			});
 		} catch (e) { ct_mediaError(new ParseError(133, "Failed to extract comments: '" + e.message + "'!", true)); }
 	}
