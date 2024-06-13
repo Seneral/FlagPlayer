@@ -2059,18 +2059,18 @@ function yt_selectThumbnail (thumbnails) {
 	return url;
 }
 function yt_parseDateText (dateText) {
-	dateText = dateText || "";
+	dateText = String(dateText) || "";
 	var usMatch = dateText.match(/([a-zA-Z]+\s*[0-9]+\s*,\s*[0-9]{4})/);
 	if (usMatch) return new Date(usMatch[1]);
 	var euMatch = dateText.match(/([0-9]{2})\.([0-9]{2})\.([0-9]{4})/);
 	if (euMatch) return new Date(parseInt(euMatch[3]), parseInt(euMatch[2])-1, parseInt(euMatch[1]));
 }
 function yt_parseLabel (label) {
-	return label?.runs?.reduce((t, r) => t += r.text, "") || label?.simpleText || label?.accessibility?.accessibilityData.label || label || "";
+	return label?.runs?.reduce((t, r) => t += r.text, "") || label?.simpleText || label?.accessibility?.accessibilityData.label || String(label) || "";
 	// Used to prefer accessibility data since numbers were more detailed, but now, some accessibility texts are longer (e.g. title by uploader instead of title)
 }
 function yt_parseText (text) {
-	return (text || "").replace(/</g,'&lt;').replace(/>/g,'&gt;');
+	return (String(text) || "").replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 function yt_parseFormattedRuns(runs) {
 	runs = runs || [];
