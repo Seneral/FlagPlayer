@@ -208,6 +208,7 @@ var ct_online; // Flag if last request suceeded
 var ct_isAdvancedCorsHost; // Boolean: Supports cookie-passing for (with others) comments
 var ct_traversedHistory; // Prevent messing with history when traversing
 var ct_timerAutoplay; // Timer ID for video end autoplay timer
+var ct_autoplayNotification; // A notification whose notOnClose action will trigger ct_nextVideo
 var ui_cntControlBar; // For control bar retraction when mouse is unmoving
 var ui_timerIndicator; // Timer ID for the current temporary indicator (pause/plax) on the video screen
 var ui_dragSlider; // Currently dragging a slider?
@@ -1072,16 +1073,19 @@ function ct_mediaError (error) {
 		md_updateStreams();
 		return;
 	} else if (error instanceof PlaybackError && error.code == 6) {
-		console.error("No stream available, reloading video!");
+		console.error("No stream available!");
 		md_state = State.Error;
 		var not = ui_setNotification("error-no-stream", 'Could not play any stream of "' + (yt_video && yt_video.meta? yt_video.meta.title : "") 
-			+ '" (' + yt_videoID + ') - <button>Retry</button>!', 3000);
+			+ '" (' + yt_videoID + ') - <button>Retry</button>!', 8000);
 		not.children[0].onclick = function() {
+			ct_stopAutoplay();
 			ct_loadMedia();
 			not.notOnClose = undefined;
 			not.notClose();
 		};
-		not.notOnClose = ct_nextVideo;
+		ct_startAutoplay(8);
+		//not.notOnClose = ct_nextVideo;
+		//ct_autoplayNotification = not; // So ct_stopAutoplay can cancel the autoplay timeout
 		return;
 	}
 	if (!(error instanceof ParseError && error.minor))
@@ -1208,6 +1212,8 @@ function ct_startAutoplay (timeout) {
 function ct_stopAutoplay () {
 	setDisplay("nextLoadIndicator", "none");
 	clearTimeout(ct_timerAutoplay);
+	if (ct_autoplayNotification)
+		ct_autoplayNotification.notOnClose = undefined;
 }
 
 //endregion
