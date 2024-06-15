@@ -1061,7 +1061,8 @@ function ct_mediaError (error) {
 		md_resetStreams();
 		md_updateStreams();
 		ui_updateStreamState();
-		ui_setNotification("vd-" + yt_videoID, 'Cache of "' + (yt_video && yt_video.meta? yt_video.meta.title : "") + '"' + yt_videoID + ' seems to be invalid!', 5000);
+		ui_setNotification("vd-" + yt_videoID, 'Cache of "' + (yt_video && yt_video.meta? yt_video.meta.title : "") 
+			+ '" (' + yt_videoID + ') seems to be invalid!', 5000);
 		return;
 	} else if (error instanceof PlaybackError && error.code == 4) {
 		console.error("Can't play selected stream!");
@@ -1073,7 +1074,14 @@ function ct_mediaError (error) {
 	} else if (error instanceof PlaybackError && error.code == 6) {
 		console.error("No stream available, reloading video!");
 		md_state = State.Error;
-		ct_loadMedia();
+		var not = ui_setNotification("error-no-stream", 'Could not play any stream of "' + (yt_video && yt_video.meta? yt_video.meta.title : "") 
+			+ '" (' + yt_videoID + ') - <button>Retry</button>!', 3000);
+		not.children[0].onclick = function() {
+			ct_loadMedia();
+			not.notOnClose = undefined;
+			not.notClose();
+		};
+		not.notOnClose = ct_nextVideo;
 		return;
 	}
 	if (!(error instanceof ParseError && error.minor))
