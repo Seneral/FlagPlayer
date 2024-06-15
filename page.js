@@ -3218,8 +3218,28 @@ function yt_decodeStreams (config) {
 						nFuncName = nFuncArr[1];
 					}
 					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*function\\s*\\(([\\w]+)\\)\\s*\\{([\\s\\S]+?\\s*return\\s[\\w]+\\.join\\s*\\(\"\"\\))");
-					nFuncVar = nFuncDecoder[1];
-					nFuncCode = nFuncDecoder[2] + ";";
+					// Now find all "symbols" and make sure none of them is suspect since we'll have to eval this code
+					var symbols = nFuncDecoder[2].match(/\b([a-zA-Z_][\w]{2,}|\"enhanced_except_.+?\")/g);
+					var whitelist = [ "var", "function", "new", "this", "null", "undefined",
+						"switch", "case", "default", "try", "catch", "for", "continue", "break", "return",
+						"forEach", "indexOf", "unshift", "push", "pop", "split", "join", "length", "splice", "reverse", 
+						"String", "fromCharCode", "Math", "pow", "abs", "sqrt", "Date"
+					];
+					var blacklistedSymbols = symbols.some(function(symbol) {
+						if (whitelist.includes(symbol))
+							return false;
+						if (symbol.includes("enhanced_except"))
+							return false;
+						console.error("Found unknown or undesired symbol in n-cipher decoding code: " + symbol + " - will not evaluate!");
+						return true;
+					});
+					if (blacklistedSymbols) {
+						console.error("Full n-cipher decoding code:\n" + nFuncDecoder[2]);
+					}
+					else {
+						nFuncVar = nFuncDecoder[1];
+						nFuncCode = nFuncDecoder[2] + ";";
+					}
 				} catch(e) { console.error("Failed to parse n-cipher code: " + e); };
 
 				// Cache and return decoding data
@@ -3256,6 +3276,8 @@ function yt_decodeStreams (config) {
 				return arr.join('');
 			},
 			decodeNCipher: function(cipher) {
+				if (!decodingData.nCodeBody)
+					return "";
 				var evalString = "\"use strict\";\nvar " + decodingData.nCodeVar + " = \"" + cipher + "\";\n(function() {\n" + decodingData.nCodeBody + "\n}())";
 				var deciphered = "";
 				try {
