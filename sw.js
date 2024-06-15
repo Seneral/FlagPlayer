@@ -6,7 +6,7 @@ Licensed under AGPLv3
 See https://github.com/Seneral/FlagPlayer for details
 */
 
-var VERSION = 42;
+var VERSION = 43;
 var APP_CACHE = "flagplayer-cache-1";
 var IMG_CACHE = "flagplayer-thumbs";
 var MEDIA_CACHE = "flagplayer-media";

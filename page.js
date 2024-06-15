@@ -2051,7 +2051,7 @@ function yt_parseTime (timeText) {
 function yt_parseNum (numText) {
 	if (numText == undefined) return 0;
 	if (Number.isInteger (numText)) return numText;
-	numMatch = numText.match(/[^0-9]*([0-9,.]+)\s?([KMBkmb]?).*/); // (5.2)(K), (5263)(), (5,263)() etc.
+	var numMatch = numText.match(/[^0-9]*([0-9,.]+)\s?([KMBkmb]?).*/); // (5.2)(K), (5263)(), (5,263)() etc.
 	if (!numMatch) return 0;
 	var num = parseInt(numMatch[1].replace(/[.,]/g,''));
 	if (isNaN(num)) return 0;
@@ -2194,7 +2194,7 @@ function yt_loadPlaylistData(listID, background) {
 			ui_addToPlaylist(0);
 		// Setup continuous loading
 		var loadPage = yt_generateContinuationLoader(function (playlist, items) {
-			newVideos = yt_parsePlaylistVideos(items);
+			var newVideos = yt_parsePlaylistVideos(items);
 			playlist.videos = playlist.videos.concat(newVideos);
 			if (!background && yt_playlist == playlist)
 				ui_addToPlaylist(playlist.videos.length-newVideos.length);
@@ -2240,7 +2240,7 @@ function yt_parsePlaylistVideos(itemList) {
 		v = v.playlistVideoRenderer;
 		if (!v) return undefined;
 		var available = v.shortBylineText != undefined;
-		u = v.shortBylineText?.runs?.[0]?.navigationEndpoint;
+		var u = v.shortBylineText?.runs?.[0]?.navigationEndpoint;
 		return {
 			title: yt_parseLabel(v.title),
 			videoID: v.videoId,
@@ -2827,6 +2827,7 @@ function yt_extractRelatedVideoData(initialData) {
 			related.continuation = yt_parseContinuationItem(results);
 			// Extract videos
 			related.videos = yt_parseRelatedVideos(results);
+		console.log("YT Related:", related);
 		}
 	} catch (e) { ct_mediaError(new ParseError(113, "Failed to read secondary video metadata: '" + e.message + "'!", true)); }
 
@@ -2838,6 +2839,7 @@ function yt_loadMoreRelatedVideos (related, pagedContent) {
 		var newVideos = yt_parseRelatedVideos(itemList);
 		related.videos = related.videos.concat(newVideos);
 		ui_addRelatedVideos(related.videos.length-newVideos.length);
+		console.log("YT Related:", related);
 	}, "next")(related, pagedContent);
 }
 function yt_parseRelatedVideos (itemList) {
@@ -3202,8 +3204,8 @@ function yt_decodeStreams (config) {
 					}
 				} catch(e) { console.error("Failed to parse cipher transform: " + e); };
 
-				var nFuncVar = "a";
-				var nFuncCode = "return a;";
+				var nFuncVar = "";
+				var nFuncCode = "";
 				try {
 					// For new n-cipher, similarly get function call first
 					var nFuncCall = jsSRC.match(/\.get\("n"\)\)&&\(b=([a-zA-Z0-9$]+)(?:\[(\d+)\])?\([a-zA-Z0-9]\)/);
@@ -3226,6 +3228,7 @@ function yt_decodeStreams (config) {
 					nCodeVar: nFuncVar,
 					nCodeBody: nFuncCode,
 				};
+				if (transformPlan && nFuncVar != "")
 				S("jsDecodeCache" + jsID, JSON.stringify(decodingData));
 
 				return decodingData;
@@ -5520,7 +5523,7 @@ function API_REQUEST (api, data) {
 		'clientName': 'WEB',
 		'clientVersion': '2.20201021.03.00'
 	};
-	apiBaseURL = "https://www.youtube.com/youtubei/v1/";
+	var apiBaseURL = "https://www.youtube.com/youtubei/v1/";
 	// Perform request
 	return fetch(ct_pref.corsAPIHost + apiBaseURL + api + "?key=" + yt_page.secrets.innertubeAPIKey, {
 		method: "POST",
