@@ -6,6 +6,8 @@ Licensed under AGPLv3
 See https://github.com/Seneral/FlagPlayer for details
 */
 
+"use strict";
+
 /* ------------------------------------ */
 /* ---- TABLE OF CONTENTS -------------	*/
 /* 
@@ -3167,48 +3169,104 @@ function yt_decodeStreams (config) {
 	// Get sign function if required (async in case it's not yet cached)
 	return new Promise (function (resolve, reject) {
 		var jsID = config.assets.js;
-		var signCache = G("jscache" + jsID);
+		var signCache = G("jsDecodeCache" + jsID);
 		if (signCache) { // Use cached signing transformation
-			resolve(signCache.split(',').map(c => {
-				var data = c.split('+');
-				return { func: data[0], value: data[1] };
-			}));
+			resolve(JSON.parse(signCache));
 		} else {
 			// Extract and cache signing transformation from large base.js (2MB download)
 			resolve(fetch(ct_pref.corsAPIHost + HOST_YT + jsID).then(function(response) {
 				return response.text();
 			}).then(function(jsSRC) {
-				// Get list of functions applied on the cipher in jsSRC code
-				var tFuncCalls = jsSRC.match (/=function\(\w\)\{\w=\w\.split\(""\);(.*?);return \w\.join\(""\)\};/)[1].split(';');
-				// Get name of object containing the function definition and escape it
-				var tFuncObjName = tFuncCalls[0].split(/\.|\[\"/)[0];
-				tFuncObjName = tFuncObjName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-				// Get list of function definitions out of the containing object in jsSRC code
-				var tFuncDefs = jsSRC.match(new RegExp("var " + tFuncObjName + "=\\{([\\s\\S]*?)\\};"))[1].split(/,[\n\r]/);
-				// Create mapping between jsSRC function name and sanitized implementation name
-				var transformMap = {};
-				for (var i = 0; i < tFuncDefs.length; i++) {
-					var funcName = tFuncDefs[i].match(/\"?(\w+)\"?:/)[1];
-					if (tFuncDefs[i].includes("reverse")) transformMap[funcName] = "rv";
-					else if (tFuncDefs[i].includes("splice")) transformMap[funcName] = "sp";
-					else if (tFuncDefs[i].includes("%")) transformMap[funcName] = "sw";
-					else console.error("Unknown decoding function '" + tFuncDefs[i] + "'!", tFuncCalls, tFuncDefs);
-				}
-				// Create list of operations {function name, parameter} defining the final signing transformation
 				var transformPlan = [];
-				for (var i = 0; i < tFuncCalls.length; i++) {
-					var callData = tFuncCalls[i].match(/\w+(?:\.|\[\")(\w+)(?:\"\])?\(\w,(\d+)\)/);
-					transformPlan.push({ func : transformMap[callData[1]], value : callData[2] });
-				}
-				// Cache and return transformPlan
-				S("jscache" + jsID, transformPlan.map(t => t.func + "+" + t.value).join(','));
-				return transformPlan;
+				try {
+					// Get list of functions applied on the cipher in jsSRC code
+					var tFuncCalls = jsSRC.match (/=function\(\w\)\{\w=\w\.split\(""\);(.*?);return \w\.join\(""\)\};/)[1].split(';');
+					// Get name of object containing the function definition and escape it
+					var tFuncObjName = tFuncCalls[0].split(/\.|\[\"/)[0];
+					tFuncObjName = tFuncObjName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+					// Get list of function definitions out of the containing object in jsSRC code
+					var tFuncDefs = jsSRC.match(new RegExp("var " + tFuncObjName + "=\\{([\\s\\S]*?)\\};"))[1].split(/,[\n\r]/);
+					// Create mapping between jsSRC function name and sanitized implementation name
+					var transformMap = {};
+					for (var i = 0; i < tFuncDefs.length; i++) {
+						var funcName = tFuncDefs[i].match(/\"?(\w+)\"?:/)[1];
+						if (tFuncDefs[i].includes("reverse")) transformMap[funcName] = "rv";
+						else if (tFuncDefs[i].includes("splice")) transformMap[funcName] = "sp";
+						else if (tFuncDefs[i].includes("%")) transformMap[funcName] = "sw";
+						else console.error("Unknown decoding function '" + tFuncDefs[i] + "'!", tFuncCalls, tFuncDefs);
+					}
+					// Create list of operations {function name, parameter} defining the final signing transformation
+					for (var i = 0; i < tFuncCalls.length; i++) {
+						var callData = tFuncCalls[i].match(/\w+(?:\.|\[\")(\w+)(?:\"\])?\(\w,(\d+)\)/);
+						transformPlan.push({ func : transformMap[callData[1]], value : callData[2] });
+					}
+				} catch(e) { console.error("Failed to parse cipher transform: " + e); };
+
+				var nFuncVar = "a";
+				var nFuncCode = "return a;";
+				try {
+					// For new n-cipher, similarly get function call first
+					var nFuncCall = jsSRC.match(/\.get\("n"\)\)&&\(b=([a-zA-Z0-9$]+)(?:\[(\d+)\])?\([a-zA-Z0-9]\)/);
+					var nFuncName = nFuncCall[1];
+					if (nFuncCall.length > 2) {
+						// Usuaully its indirectly called through an array of length 1
+						if (nFuncCall[2] != "0")
+							throw "Could not decode new n-cipher, function call indirection had index " + nFuncCall[2] + "!"
+						var nFuncArr = jsSRC.match("var " + nFuncName + "\\s*=\\s*\\[(.+?)\\]\\s*[,;]");
+						nFuncName = nFuncArr[1];
+					}
+					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*function\\s*\\(([\\w]+)\\)\\s*\\{([\\s\\S]+?\\s*return\\s[\\w]+\\.join\\s*\\(\"\"\\))");
+					nFuncVar = nFuncDecoder[1];
+					nFuncCode = nFuncDecoder[2] + ";";
+				} catch(e) { console.error("Failed to parse n-cipher code: " + e); };
+
+				// Cache and return decoding data
+				var decodingData = {
+					sPlan: transformPlan,
+					nCodeVar: nFuncVar,
+					nCodeBody: nFuncCode,
+				};
+				S("jsDecodeCache" + jsID, JSON.stringify(decodingData));
+
+				return decodingData;
 			}));
 		}
 	})
-
+	// Convert decoding data to decoding functions
+	.then(function (decodingData)
+	{
+		return {
+			decodeSCipher: function(cipher) {
+				var arr = cipher.split('');
+				for (var j = 0; j < decodingData.sPlan.length; j++) { 
+					switch (decodingData.sPlan[j].func) {
+						case "rv": arr.reverse(); break;
+						case "sp": arr.splice(0, decodingData.sPlan[j].value); break;
+						case "sw": 
+							var b = decodingData.sPlan[j].value % arr.length; 
+							var a = arr[0]; 
+							arr[0] = arr[b]; 
+							arr[b] = a; 
+							break;
+					}
+				}
+				return arr.join('');
+			},
+			decodeNCipher: function(cipher) {
+				var evalString = "\"use strict\";\nvar " + decodingData.nCodeVar + " = \"" + cipher + "\";\n(function() {\n" + decodingData.nCodeBody + "\n}())";
+				var deciphered = "";
+				try {
+					deciphered = eval?.(evalString);
+				}
+				catch (e) { console.error("Failed to evaluate n-cipher code: " + e); return ""; };
+				if (deciphered.includes("except"))
+					return "";
+				return deciphered;
+			}
+		};
+	})
 	// Decipher streams by applying the sign function if required
-	.then(function (transformPlan) {
+	.then(function (decoders) {
 		// Sign any stream urls that are yet unsigned
 		// s is unsigned cipher to sign, url requires signature, sp is parameter name to assign the signature to
 		for (var i = 0; i < streams.length; i++) {
@@ -3218,21 +3276,23 @@ function yt_decodeStreams (config) {
 			if (stream.signatureCipher) // Encoded on some desktop videos: s, url, sp
 				new URLSearchParams (stream.signatureCipher).forEach(function (v, n) { stream[n] = v; });
 			if (stream.s) {
-				var arr = stream.s.split('');
-				for (var j = 0; j < transformPlan.length; j++) { 
-					switch (transformPlan[j].func) {
-						case "rv": arr.reverse(); break;
-						case "sp": arr.splice(0, transformPlan[j].value); break;
-						case "sw": 
-							var b = transformPlan[j].value % arr.length; 
-							var a = arr[0]; 
-							arr[0] = arr[b]; 
-							arr[b] = a; 
-							break;
-					}
-				}
-				var sign = arr.join('');
+				var sign = decoders.decodeSCipher(stream.s);
 				stream.url = stream.url + "&" + (stream.sp || "sig") + "=" + encodeURIComponent(sign);
+			}
+			var url = stream.url.split('?');
+			var params = new URLSearchParams(url[1]);
+			if (params.has("n")) {
+				// Modify cipher parameter
+				var cipher = decodeURIComponent(params.get("n"));
+				var sign = decoders.decodeNCipher(cipher);
+				if (!sign) { // Prevent known bad url from being used
+					stream.unavailable = true;
+					continue;
+				}
+				sign = encodeURIComponent(sign);
+				params.set("n", sign);
+				// Re-assemble URL
+				stream.url = url[0] + '?' + params.toString();
 			}
 			//if (!stream.url.includes("ratebypass")) stream.url += "&ratebypass=yes";
 		}
