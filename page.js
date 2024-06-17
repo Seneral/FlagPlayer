@@ -3220,15 +3220,17 @@ function yt_decodeStreams (config) {
 					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*function\\s*\\(([\\w]+)\\)\\s*\\{([\\s\\S]+?\\s*return\\s[\\w]+\\.join\\s*\\(\"\"\\))");
 					// Now find all "symbols" and make sure none of them is suspect since we'll have to eval this code
 					var symbols = nFuncDecoder[2].match(/\b([a-zA-Z_][\w]{2,}|\"enhanced_except_.+?\")/g);
-					var whitelist = [ "var", "function", "new", "this", "null", "undefined",
-						"switch", "case", "default", "try", "catch", "for", "continue", "break", "return",
+					var whitelist = [ "var", "function", "new", "this", "null", "undefined", "NaN",
+						"switch", "case", "default", "throw", "try", "catch", "finally", "for", "continue", "break", "return",
 						"forEach", "indexOf", "unshift", "push", "pop", "split", "join", "length", "splice", "reverse", 
 						"String", "fromCharCode", "Math", "pow", "abs", "sqrt", "Date"
 					];
 					var blacklistedSymbols = symbols.some(function(symbol) {
 						if (whitelist.includes(symbol))
 							return false;
-						if (symbol.includes("enhanced_except"))
+						if (symbol.startsWith("enhanced_except"))
+							return false;
+						if (symbol.startsWith("\\u"))
 							return false;
 						console.error("Found unknown or undesired symbol in n-cipher decoding code: " + symbol + " - will not evaluate!");
 						return true;
