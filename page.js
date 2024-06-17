@@ -3168,6 +3168,37 @@ function yt_decodeStreams (config) {
 	if (config.args && config.args.adaptive_fmts)
 		adaptiveStreams = adaptiveStreams.concat(config.args.adaptive_fmts.split(',').map(parseStreams));
 	var streams = (legacyStreams || []).concat(adaptiveStreams || []);
+
+	var checkMaliciousDecipherCode = function(code) {
+		// Find all "symbols" and make sure none of them is suspect since we'll have to eval this code
+		var symbolMatch = /\b(\"[a-zA-Z0-9_-]+?\"|[a-zA-Z_][\w]{2,})/g;
+		var whitelist = [ "var", "function", "new", "this", "null", "undefined", "NaN",
+			"switch", "case", "default", "throw", "try", "catch", "finally", "for", "continue", "break", "return",
+			"forEach", "indexOf", "unshift", "push", "pop", "split", "join", "length", "splice", "reverse", 
+			"String", "fromCharCode", "Math", "pow", "abs", "sqrt", "Date"
+		];
+		var match;
+		while ((match = symbolMatch.exec(code)) != null) {
+			var symbol = match[0];
+			if (whitelist.includes(symbol))
+				continue;
+			if (symbol.startsWith("\"enhanced_except"))
+				continue; // known string
+			var preChar = match.index > 0? code[match.index-1] : 0;
+			if (symbol.startsWith("\"") || preChar === '"' || preChar === "'") {
+				// Sadly, weird strings ARE found in these codes, cannot exclude them being used to call functions on objects that we do allow
+				console.warn("Unverified string '" + symbol + "' in decipher code, may be used to evaluate unsanctioned code!");
+				continue;
+			}
+			if (symbol.toLowerCase().startsWith("u") && preChar == "\\")
+				continue; // unicode probably
+			var tChar = typeof preChar;
+			var tCheck = typeof '"';
+			console.error("Found unknown or undesired symbol in n-cipher decoding code: " + symbol + " - will not evaluate!");
+			blacklistedSymbols = true;
+		}
+	};
+	
 	// Get sign function if required (async in case it's not yet cached)
 	return new Promise (function (resolve, reject) {
 		var jsID = config.assets.js;
@@ -3219,24 +3250,8 @@ function yt_decodeStreams (config) {
 					}
 					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*function\\s*\\(([\\w]+)\\)\\s*\\{([\\s\\S]+?\\s*return\\s[\\w]+\\.join\\s*\\(\"\"\\))");
 					// Now find all "symbols" and make sure none of them is suspect since we'll have to eval this code
-					var symbols = nFuncDecoder[2].match(/\b([a-zA-Z_][\w]{2,}|\"enhanced_except_.+?\")/g);
-					var whitelist = [ "var", "function", "new", "this", "null", "undefined", "NaN",
-						"switch", "case", "default", "throw", "try", "catch", "finally", "for", "continue", "break", "return",
-						"forEach", "indexOf", "unshift", "push", "pop", "split", "join", "length", "splice", "reverse", 
-						"String", "fromCharCode", "Math", "pow", "abs", "sqrt", "Date"
-					];
-					var blacklistedSymbols = symbols.some(function(symbol) {
-						if (whitelist.includes(symbol))
-							return false;
-						if (symbol.startsWith("enhanced_except"))
-							return false;
-						if (symbol.startsWith("\\u"))
-							return false;
-						console.error("Found unknown or undesired symbol in n-cipher decoding code: " + symbol + " - will not evaluate!");
-						return true;
-					});
-					if (blacklistedSymbols) {
-						console.error("Full n-cipher decoding code:\n" + nFuncDecoder[2]);
+					if (checkMaliciousDecipherCode(nFuncDecoder[2])) {
+						console.error("Rejecting n-cipher decoding code, cannot verify:\n" + nFuncDecoder[2]);
 					}
 					else {
 						nFuncVar = nFuncDecoder[1];
@@ -3250,8 +3265,8 @@ function yt_decodeStreams (config) {
 					nCodeVar: nFuncVar,
 					nCodeBody: nFuncCode,
 				};
-				if (transformPlan && nFuncVar != "")
-				S("jsDecodeCache" + jsID, JSON.stringify(decodingData));
+				if (transformPlan && nFuncVar && nFuncCode)
+					S("jsDecodeCache" + jsID, JSON.stringify(decodingData));
 
 				return decodingData;
 			}));
@@ -3260,6 +3275,10 @@ function yt_decodeStreams (config) {
 	// Convert decoding data to decoding functions
 	.then(function (decodingData)
 	{
+		// Re-check cached code with potentially updated criterias
+		var discardNCipherCode = checkMaliciousDecipherCode(decodingData.nCodeBody);
+		if (discardNCipherCode)
+			localStorage.removeItem("jsDecodeCache" + jsID);
 		return {
 			decodeSCipher: function(cipher) {
 				var arr = cipher.split('');
@@ -3278,7 +3297,7 @@ function yt_decodeStreams (config) {
 				return arr.join('');
 			},
 			decodeNCipher: function(cipher) {
-				if (!decodingData.nCodeBody)
+				if (!decodingData.nCodeBody || discardNCipherCode)
 					return "";
 				var evalString = "\"use strict\";\nvar " + decodingData.nCodeVar + " = \"" + cipher + "\";\n(function() {\n" + decodingData.nCodeBody + "\n}())";
 				var deciphered = "";
