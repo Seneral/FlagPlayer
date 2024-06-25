@@ -2522,26 +2522,51 @@ function yt_extractChannelPageTabs (initialData) {
 			if (!tab.continuation) tab.loadReady = true;
 		}
 		else if (c.shelfRenderer) { // Nasty shelf setup - handle multiple tabs
+			if (c.shelfRenderer.content?.expandedShelfContentsRenderer)
+			{ // We don't have the concept of sub-tabs, so just add each playlist as a sub-tab
+				c.shelfRenderer.content.expandedShelfContentsRenderer.items?.forEach(s => handleContainer(tab, s));
+				return;
+			}
 			var s = c.shelfRenderer;
 			tab.title = yt_parseLabel (s.title);
 			var play = s.playAllButton? s.playAllButton.buttonRenderer.navigationEndpoint : s.playEndpoint;
-			tab.listContent = { // Associated list (may not contain all videos)
-				listID: play.watchEndpoint.playlistId,
-				itctToken: play.clickTrackingParams,
-			};
-			var browseUrl = (s.endpoint.commandMetadata.webCommandMetadata.url || s.endpoint.commandMetadata.webCommandMetadata.apiUrl);
-			if (browseUrl.includes("shelf_id")) { // Usually when content is gridRenderer
+			if (play && play.watchEndpoint) {
+				tab.listContent = { // Associated list (may not contain all videos)
+					listID: play.watchEndpoint.playlistId,
+					itctToken: play.clickTrackingParams,
+				};
+			}
+			var browseUrl = (s.endpoint?.commandMetadata?.webCommandMetadata?.url || s.endpoint?.commandMetadata?.webCommandMetadata?.apiUrl);
+			if (browseUrl && browseUrl.includes("shelf_id")) { // Usually when content is gridRenderer
 				tab.browseContent = { // May imply that associated list does not contain all videos - only separate shelf browse page does
 					startURL: browseUrl,
 					itctToken: s.endpoint.clickTrackingParams,
 				};
 			}
+			if (!tab.listContent && !tab.browseContent) {
+				console.error("Unhandled shelfRenderer: ", s);
+				return; // Useless tab
+			}
 			// Extract visible items
 			var container = (s.content.verticalListRenderer || s.content.horizontalListRenderer || s.content.gridRenderer);
 			if (!container) console.error("Unhandled shelfRenderer container: ", c.shelfRenderer.content);
 			else tab.videos = yt_parseChannelVideos(container.items);
-
-		} 
+		}
+		else if (c.playlistRenderer) { // Playlist preview
+			var p = c.playlistRenderer;
+			tab.title = yt_parseLabel (p.title);
+			var fullPl = p.viewPlaylistText?.runs?.[0]?.navigationEndpoint;
+			if (fullPl) {
+				tab.listContent = { // Associated list
+					listID: p.playlistId,
+					itctToken: fullPl.clickTrackingParams,
+				};
+			}
+			else { // Tab is useless
+				console.error("Unhandled playlistRenderer: ", p);
+				return;
+			}
+		}
 		else if (c.gridRenderer) { // Simple uploads all together
 			tab.title = "Uploads";
 			tab.continuation = yt_parseContinuations(c.gridRenderer.continuations) || yt_parseContinuationItem(c.gridRenderer.items);
