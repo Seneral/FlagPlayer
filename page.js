@@ -3197,12 +3197,13 @@ function yt_decodeStreams (config) {
 	var checkMaliciousDecipherCode = function(code) {
 		// Find all "symbols" and make sure none of them is suspect since we'll have to eval this code
 		var symbolMatch = /\b(\"[a-zA-Z0-9_-]+?\"|[a-zA-Z_][\w]{2,})/g;
-		var whitelist = [ "var", "function", "new", "this", "null", "undefined", "NaN",
+		var whitelist = [ "var", "void", "function", "new", "this", "null", "undefined", "NaN",
 			"switch", "case", "default", "throw", "try", "catch", "finally", "for", "continue", "break", "return",
 			"forEach", "indexOf", "unshift", "push", "pop", "split", "join", "length", "splice", "reverse", 
 			"String", "fromCharCode", "Math", "pow", "abs", "sqrt", "Date"
 		];
 		var match;
+		var blacklistedSymbols = false;
 		while ((match = symbolMatch.exec(code)) != null) {
 			var symbol = match[0];
 			if (whitelist.includes(symbol))
@@ -3222,6 +3223,7 @@ function yt_decodeStreams (config) {
 			console.error("Found unknown or undesired symbol in n-cipher decoding code: " + symbol + " - will not evaluate!");
 			blacklistedSymbols = true;
 		}
+		return blacklistedSymbols;
 	};
 	
 	// Get sign function if required (async in case it's not yet cached)
@@ -4136,7 +4138,7 @@ function ui_fillChannelTab (tab) {
 	// Setup Loader
 	// TODO: This rarely loads the first set of videos that was already parsed again
 	var loader = yt_generateContinuationLoader(function (tab, itemList) {
-		newVideos = yt_parseChannelVideos(itemList);
+		var newVideos = yt_parseChannelVideos(itemList);
 		tab.videos = tab.videos.concat(newVideos);
 		ui_addChannelUploads(tab.container, tab.videos, tab.videos.length-newVideos.length)
 	});
