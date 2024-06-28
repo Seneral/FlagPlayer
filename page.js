@@ -3268,12 +3268,14 @@ function yt_decodeStreams (config) {
 					// For new n-cipher, similarly get function call first
 					var nFuncCall = jsSRC.match(/\.get\("n"\)\)&&\(b=([a-zA-Z0-9$]+)(?:\[(\d+)\])?\([a-zA-Z0-9]\)/);
 					var nFuncName = nFuncCall[1];
+					nFuncName = nFuncName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
 					if (nFuncCall.length > 2) {
 						// Usuaully its indirectly called through an array of length 1
 						if (nFuncCall[2] != "0")
 							throw "Could not decode new n-cipher, function call indirection had index " + nFuncCall[2] + "!"
 						var nFuncArr = jsSRC.match("var " + nFuncName + "\\s*=\\s*\\[(.+?)\\]\\s*[,;]");
 						nFuncName = nFuncArr[1];
+						nFuncName = nFuncName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
 					}
 					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*function\\s*\\(([\\w]+)\\)\\s*\\{([\\s\\S]+?\\s*return\\s[\\w]+\\.join\\s*\\(\"\"\\))");
 					// Now find all "symbols" and make sure none of them is suspect since we'll have to eval this code
@@ -3293,7 +3295,14 @@ function yt_decodeStreams (config) {
 					nCodeBody: nFuncCode,
 				};
 				if (transformPlan && nFuncVar && nFuncCode)
+				{
 					S("jsDecodeCache" + jsID, JSON.stringify(decodingData));
+					console.log("Successfully parsed decoding data for id " + jsID + ":");
+				}
+				else
+					console.log("Failed to parse decoding data for id " + jsID + ":");
+				console.log("  Transform plan: " + transformPlan);
+				console.log("  nFunc (" + nFuncVar + "): " + nFuncCode);
 
 				return decodingData;
 			}));
