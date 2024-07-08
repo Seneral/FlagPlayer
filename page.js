@@ -3200,7 +3200,8 @@ function yt_decodeStreams (config) {
 		var whitelist = [ "var", "void", "function", "new", "this", "null", "undefined", "NaN",
 			"switch", "case", "default", "throw", "try", "catch", "finally", "for", "continue", "break", "return",
 			"forEach", "indexOf", "unshift", "push", "pop", "split", "join", "length", "splice", "reverse", 
-			"String", "fromCharCode", "Math", "pow", "abs", "sqrt", "Date"
+			"String", "fromCharCode", "Math", "pow", "abs", "sqrt", "Date",
+			"Array", "prototype", "call"
 		];
 		var match;
 		var blacklistedSymbols = false;
@@ -3266,7 +3267,7 @@ function yt_decodeStreams (config) {
 				var nFuncCode = "";
 				try {
 					// For new n-cipher, similarly get function call first
-					var nFuncCall = jsSRC.match(/\.get\("n"\)\)&&\(b=([a-zA-Z0-9$]+)(?:\[(\d+)\])?\([a-zA-Z0-9]\)/);
+					var nFuncCall = jsSRC.match(/(?:\.get\("n"\)\)&&\(b=|b=String\.fromCharCode\(110\),c=a\.get\(b\)\)&&\(c=)([a-zA-Z0-9$]+)(?:\[(\d+)\])?\([a-zA-Z0-9]\)/);
 					var nFuncName = nFuncCall[1];
 					nFuncName = nFuncName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
 					if (nFuncCall.length > 2) {
@@ -3277,7 +3278,7 @@ function yt_decodeStreams (config) {
 						nFuncName = nFuncArr[1];
 						nFuncName = nFuncName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
 					}
-					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*function\\s*\\(([\\w]+)\\)\\s*\\{([\\s\\S]+?\\s*return\\s[\\w]+\\.join\\s*\\(\"\"\\))");
+					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*function\\s*\\(([\\w]+)\\)\\s*\\{([\\s\\S]+?\\s*return\\s(?:[\\w]+\\.join\\s*\\(\"\"\\)|Array\\.prototype\\.join\\.call\\([\\w]+,\\s*\"\"\\)))");
 					// Now find all "symbols" and make sure none of them is suspect since we'll have to eval this code
 					if (checkMaliciousDecipherCode(nFuncDecoder[2])) {
 						console.error("Rejecting n-cipher decoding code, cannot verify:\n" + nFuncDecoder[2]);
@@ -3301,8 +3302,10 @@ function yt_decodeStreams (config) {
 				}
 				else
 					console.log("Failed to parse decoding data for id " + jsID + ":");
-				console.log("  Transform plan: " + transformPlan);
-				console.log("  nFunc (" + nFuncVar + "): " + nFuncCode);
+				console.log("  Transform plan: ");
+				console.log(transformPlan);
+				console.log("  nFunc (" + nFuncVar + "): ");
+				console.log(nFuncCode);
 
 				return decodingData;
 			}));
