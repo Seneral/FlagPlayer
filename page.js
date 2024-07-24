@@ -3267,7 +3267,20 @@ function yt_decodeStreams (config) {
 				var nFuncCode = "";
 				try {
 					// For new n-cipher, similarly get function call first
-					var nFuncCall = jsSRC.match(/(?:\.get\("n"\)\)&&\(b=|b=String\.fromCharCode\(110\),c=a\.get\(b\)\)&&\(c=)([a-zA-Z0-9$]+)(?:\[(\d+)\])?\([a-zA-Z0-9]\)/);
+					var nFuncCall = jsSRC.match(
+						"(?:"
+							+ "\\.get\\(\"n\"\\)\\)&&\\(b="
+							+ "|"
+							+ "(?:"
+								+ "b=String\\.fromCharCode\\(110\\)"
+								+ "|"
+								+ "(?:[a-zA-Z0-9$.]+)&&\\(b=\"nn\"\\[\\+(?:[a-zA-Z0-9$.]+)\\]"
+							+ ")"
+							+ ",c=a\\.get\\(b\\)\\)&&\\(c="
+						+ ")"
+						+ "([a-zA-Z0-9$]+)"
+						+ "(?:\\[(\\d+)\\])?\\([a-zA-Z0-9]\\)"
+					);
 					var nFuncName = nFuncCall[1];
 					nFuncName = nFuncName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
 					if (nFuncCall.length > 2) {
