@@ -3274,31 +3274,45 @@ function yt_decodeStreams (config) {
 							+ "(?:"
 								+ "b=String\\.fromCharCode\\(110\\)"
 								+ "|"
-								+ "(?:[a-zA-Z0-9$.]+)&&\\(b=\"nn\"\\[\\+(?:[a-zA-Z0-9$.]+)\\]"
+								+ "(?<str_idx>[a-zA-Z0-9$.]+)&&\\(b=\"nn\"\\[\\+\\k<str_idx>\\]"
 							+ ")"
 							+ ",c=a\\.get\\(b\\)\\)&&\\(c="
+							+ "|"
+							+ "\\b(?<var>[a-zA-Z0-9_$]+)="
 						+ ")"
-						+ "([a-zA-Z0-9$]+)"
-						+ "(?:\\[(\\d+)\\])?\\([a-zA-Z0-9]\\)"
+						+ "(?<nfunc>[a-zA-Z0-9$]+)"
+						+ "(?:\\[(?<idx>\\d+)\\])?\\([a-zA-Z0-9]\\)"
+						+ "(?:[a-zA-Z0-9_$]+\\.set\\(\"n\"\\,\\k<var>\\),\\k<nfunc>\\.length)"
 					);
-					var nFuncName = nFuncCall[1];
-					nFuncName = nFuncName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
-					if (nFuncCall.length > 2) {
-						// Usuaully its indirectly called through an array of length 1
-						if (nFuncCall[2] != "0")
-							throw "Could not decode new n-cipher, function call indirection had index " + nFuncCall[2] + "!"
-						var nFuncArr = jsSRC.match("var " + nFuncName + "\\s*=\\s*\\[(.+?)\\]\\s*[,;]");
-						nFuncName = nFuncArr[1];
-						nFuncName = nFuncName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
+
+					if (!nFuncCall || !nFuncCall.groups.nfunc) {
+						
+						nFuncCall = jsSRC.match("(?<nfunc>[a-zA-Z0-9$]+)\\s*=\\s*"
+							+ "function\\s*\\((?:[\\w]+)\\)\\s*\\{"
+								+ "(?:(?!\};)[\\s\\S])+?[\"\']enhanced_except_");
 					}
-					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*function\\s*\\(([\\w]+)\\)\\s*\\{([\\s\\S]+?\\s*return\\s(?:[\\w]+\\.join\\s*\\(\"\"\\)|Array\\.prototype\\.join\\.call\\([\\w]+,\\s*\"\"\\)))");
+
+					var nFuncName = nFuncCall.groups.nfunc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
+					if (nFuncCall.groups.idx) {
+						// Usuaully its indirectly called through an array of length 1
+						if (nFuncCall.groups.idx != "0")
+							throw "Could not decode new n-cipher, function call indirection had index " + nFuncCall.groups.idx + "!"
+						var nFuncArr = jsSRC.match("var " + nFuncName + "\\s*=\\s*\\[(?<nfunc>[a-zA-Z0-9$]+)\\]\\s*[,;]");
+						nFuncName = nFuncArr.groups.nfunc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape for use in regex
+					}
+					var nFuncDecoder = jsSRC.match(nFuncName + "\\s*=\\s*"
+						+ "function\\s*\\((?<var>[\\w]+)\\)\\s*\\{"
+							+ "(?<code>[\\s\\S]+?"
+								+ "\\s*return\\s(?:[\\w]+\\.join\\s*\\(\"\"\\)|Array\\.prototype\\.join\\.call\\([\\w]+,[\\s\\S]+?\\))"
+							+ ")"
+						+ "\};");
 					// Now find all "symbols" and make sure none of them is suspect since we'll have to eval this code
-					if (checkMaliciousDecipherCode(nFuncDecoder[2])) {
-						console.error("Rejecting n-cipher decoding code, cannot verify:\n" + nFuncDecoder[2]);
+					if (checkMaliciousDecipherCode(nFuncDecoder.groups.code)) {
+						console.error("Rejecting n-cipher decoding code, cannot verify:\n" + nFuncDecoder.groups.code);
 					}
 					else {
-						nFuncVar = nFuncDecoder[1];
-						nFuncCode = nFuncDecoder[2] + ";";
+						nFuncVar = nFuncDecoder.groups.var;
+						nFuncCode = nFuncDecoder.groups.code + ";";
 					}
 				} catch(e) { console.error("Failed to parse n-cipher code: " + e); };
 
