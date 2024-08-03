@@ -3365,15 +3365,32 @@ function yt_decodeStreams (config) {
 			decodeNCipher: function(cipher) {
 				if (!decodingData.nCodeBody || discardNCipherCode)
 					return "";
-				var evalString = "\"use strict\";\nvar " + decodingData.nCodeVar + " = \"" + cipher + "\";\n(function() {\n" + decodingData.nCodeBody + "\n}())";
-				var deciphered = "";
 				try {
-					deciphered = eval?.(evalString);
+					// Protect as many global variables as possible (all that are configurable)
+					// Copy them to backup and hide backup from evaluating scope before restoring
+					let backup = {};
+					for (let k of Object.keys(window)) {
+						let prop = Object.getOwnPropertyDescriptor(window, k);
+						if (!prop.configurable) continue; // Cannot protect this global variable
+						backup[k] = prop;
+						delete window[k];
+					}
+					var evalString = "\"use strict\";\nlet backup = {};\n(function(" + decodingData.nCodeVar + ") {\n" + decodingData.nCodeBody + "\n}(\"" + cipher + "\"))";
+					var deciphered = "";
+					try {
+						deciphered = eval?.(evalString);
+					}
+					catch (e) { console.error("Failed to evaluate n-cipher code: " + e); return ""; };
+					for (let k of Object.keys(backup)) {
+						if (Object.getOwnPropertyDescriptor(window, k) != undefined)
+							console.warn("Failed to protect global variable " + k + " or n deciphering code attempted to overwrite it!");
+						Object.defineProperty(window, k, backup[k]);
+					}
+					if (deciphered.includes("except"))
+						return "";
+					return deciphered;
 				}
-				catch (e) { console.error("Failed to evaluate n-cipher code: " + e); return ""; };
-				if (deciphered.includes("except"))
-					return "";
-				return deciphered;
+				catch (e) { console.error("Failed to prepare safe evaluation environment for n-cipher code: " + e); return ""; };
 			}
 		};
 	})
